@@ -166,3 +166,8 @@ Limits the renderer enforces: charts show up to 13 months; carousel up to 6 item
 * `severity` must be one of the four values; the badge text (not just colour) shows it.
 * `action_message` must be phrased as the customer would say it; it is echoed in the transcript.
 * Do not put a `$` in numeric fields; `show_rebate_card.amount` is the only money field that is a display string.
+
+## 0b. Rev 19: web deployments are pinned to an app version
+
+The web widget deployment serves the app version it points to, not the draft. A version created before the CUSTOM widget tools delivers card tools as built-in typed payloads ({type: 'quick_actions', prompt, options}), which chat-messenger.js v1.16 cannot render: its card renderer throws and the whole reply (text too) disappears. After every agent push that changes widget tools, create a version and repoint the deployment (WGL-Demo, c746ebd7-e448-4c29-a028-df672baa388c) to it. ssistant.js (
+ormalizeMessages) now converts such built-in elements into the matching cx-show-* element and drops anything it cannot render, so text is always shown. Checking with Sessions.run must pass deployment_id to see what the widget gets.

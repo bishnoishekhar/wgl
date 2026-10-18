@@ -813,7 +813,7 @@
     });
     WglCard.prototype.connectedCallback = function () {
       if (this._root) { return; }
-      this._root = this.attachShadow({ mode: "open" });
+      try { this._root = this.attachShadow({ mode: "open" }); } catch (err) { console.warn("[wgl] card shadow root failed:", err); return; }
       this._render();
       var self = this;
       this._root.addEventListener("click", function (ev) { self._click(ev); });
@@ -831,8 +831,10 @@
       var tool = p.tool || TAG_TOOL[this.localName];
       var args = p.tool ? (p.args || p.data || {}) : p;
       this._tool = tool;
-      this._root.innerHTML = buildCardHTML(tool, args);
-      if (tool === "show_welcome_chips" && welcomeCards.indexOf(this) < 0) { welcomeCards.push(this); }
+      try {
+        this._root.innerHTML = buildCardHTML(tool, args);
+        if (tool === "show_welcome_chips" && welcomeCards.indexOf(this) < 0) { welcomeCards.push(this); }
+      } catch (err) { console.warn("[wgl] card render failed for", tool, err); }
     };
     WglCard.prototype._go = function (track, dir) {
       var s = track.querySelector(".slide");
@@ -918,16 +920,66 @@
     return true;
   }
   function lastSegment(p) { var s = String(p || "").split("/"); return s[s.length - 1]; }
-  function onResponse(e) {
-    var raw = e && e.detail && e.detail.raw;
-    var outs = (raw && raw.outputs) || [];
-    outs.forEach(function (o) {
-      var calls = (o && o.toolCalls && o.toolCalls.toolCalls) || [];
-      calls.forEach(function (c) {
-        var name = lastSegment(c && c.tool);
-        if (CARDS[name]) { renderTool(name, c.args); }
+  /* Rich element types the SDK renders itself. Anything else inside a customCard makes the SDK throw while it
+     draws the message (TypeError in its card renderer), and then the WHOLE reply, text included, never appears.
+     That is what happens when the platform delivers a widget tool in its built-in shape {type: "quick_actions",
+     prompt, options} (a web deployment pinned to an old app version does this) instead of a custom_template. */
+  var SDK_TYPES = { info: 1, description: 1, image: 1, list: 1, button: 1, accordion: 1, chips: 1, html: 1, match_citations: 1,
+    custom_template: 1, video: 1, files: 1, divider: 1, table: 1, text: 1, customCard: 1 };
+  function cardTagFor(type) {
+    var tool = "show_" + String(type || "").replace(/^show_/, "");
+    return CARDS[tool] ? "cx-" + tool.replace(/_/g, "-") : "";
+  }
+  /* Runs before the SDK draws the reply (the response-received event fires first, and the messages array is the one
+     the SDK renders): turn built-in-typed elements into our custom elements, drop what nothing can render, keep text. */
+  function normalizeMessages(msgs) {
+    if (!Array.isArray(msgs)) { return; }
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      var m = msgs[i];
+      if (!m || typeof m !== "object") { msgs.splice(i, 1); continue; }
+      var els = m.type === "customCard" && Array.isArray(m.richElements) ? m.richElements : null;
+      var list = els || [m];
+      var out = [];
+      list.forEach(function (el) {
+        if (!el || typeof el !== "object") { return; }
+        if (SDK_TYPES[el.type] && !(el.type === "custom_template" && !(window.customElements && customElements.get(el.name)))) { out.push(el); return; }
+        var tag = el.type === "custom_template" ? "" : cardTagFor(el.type);
+        if (tag) {
+          var fields = {};
+          Object.keys(el).forEach(function (k) { if (k !== "type" && k !== "id" && k !== "name") { fields[k] = el[k]; } });
+          if (el.type === "custom_template" && el.payload) { fields = el.payload; }
+          out.push({ type: "custom_template", name: tag, id: el.id || "wgl-" + Date.now() + "-" + i, payload: fields });
+          console.warn("[wgl] converted a built-in '" + el.type + "' element into <" + tag + ">");
+        } else {
+          console.warn("[wgl] dropped an element the chat cannot render:", el.type, el.name || "");
+        }
       });
-    });
+      if (!els) {
+        if (out.length === 1 && out[0] !== m) { msgs[i] = out[0]; } else if (!out.length) { msgs.splice(i, 1); }
+      } else {
+        var plain = out.filter(function (x) { return x.type !== "custom_template"; });
+        var cards = out.filter(function (x) { return x.type === "custom_template"; });
+        var repl = [];
+        if (plain.length) { m.richElements = plain; repl.push(m); }
+        cards.forEach(function (c) { repl.push(c); });
+        Array.prototype.splice.apply(msgs, [i, 1].concat(repl));
+      }
+    }
+  }
+  function onResponse(e) {
+    try { normalizeMessages(e && e.detail && e.detail.messages); }
+    catch (err) { console.warn("[wgl] could not normalize the reply:", err); }
+    try {
+      var raw = e && e.detail && e.detail.raw;
+      var outs = (raw && raw.outputs) || [];
+      outs.forEach(function (o) {
+        var calls = (o && o.toolCalls && o.toolCalls.toolCalls) || [];
+        calls.forEach(function (c) {
+          var name = lastSegment(c && c.tool);
+          if (CARDS[name]) { renderTool(name, c.args); }
+        });
+      });
+    } catch (err2) { console.warn("[wgl] tool-call fallback failed:", err2); }
   }
 
   /* ---- welcome rendered by the website when the chat opens (once per browser session) ---- */
