@@ -32,6 +32,12 @@
     - chat-title is "Washington Gas Assistant"
     - chat-title-icon is an inline data-URI SVG of the site's flame mark (no external image)
     - enable-file-upload and enable-audio-input are kept (chat AND voice/microphone)
+    - enableWelcomeEvent: false (Rev 18). The WEBSITE greets the visitor when the chat opens (assistant.js renders a
+      page-aware welcome and the page chips with an English | Espanol toggle, no agent call and no welcome event).
+      The agent is first invoked by a chip tap or typed text, with the widget variables {page_context, ui_language}
+      that assistant.js keeps in sessionStorage "chat-messenger-variables"
+    - chat-subtitle ("Online" line), placeholder-text, bot-writing-text added for the premium look
+    - graphical cards: assets/js/assistant.js defines <wgl-card> and registers the card tools (see docs/widget-contract.md)
   Theming lives in assets/css/widget-theme.css (loaded after the SDK CSS).
 
   Voice: the SDK has no separate "call" attribute. Voice is: enable-audio-input (adds a
@@ -60,13 +66,14 @@
     chatSdk.registerContext(
       chatSdk.prebuilts.ces.createContext({
         deploymentName: "projects/483471568825/locations/us/apps/5c509d39-b4e9-4d98-a61c-a261181fe038/deployments/c746ebd7-e448-4c29-a028-df672baa388c",
-        tokenBroker: { enableTokenBroker: true, enableRecaptcha: false }
+        tokenBroker: { enableTokenBroker: true, enableRecaptcha: false },
+        enableWelcomeEvent: false
       }),
     );
   });
 </script>
 <chat-messenger url-allowlist="*">
-  <chat-messenger-chat-bubble align-bottom-right allow-fullscreen="small" chat-title="Washington Gas Assistant" chat-title-icon="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Ccircle%20cx='16'%20cy='16'%20r='16'%20fill='%23fff'/%3E%3Cpath%20fill='%230072bc'%20d='M16.5%204c.4%204.2-2.2%206.6-4.4%209.2C10%2015.7%208.8%2018%208.8%2020.6a7.2%207.2%200%200%200%2014.4%200c0-3.200-1.800-5.700-3.400-7.300-.2%201.800-1%203-2.200%203.700.6-4.600-.4-9-1.100-13z'/%3E%3Cpath%20fill='%235fc6ff'%20d='M16%2027a3.800%203.800%200%200%201-3.800-3.800c0-2.100%201.800-3.600%203.800-6%202%202.400%203.800%203.900%203.800%206A3.800%203.800%200%200%201%2016%2027z'/%3E%3C/svg%3E" enable-file-upload enable-audio-input>
+  <chat-messenger-chat-bubble align-bottom-right allow-fullscreen="small" chat-title="Washington Gas Assistant" chat-subtitle="&#9679; Online &middot; replies in seconds" placeholder-text="Ask about your bill, usage or rebates" bot-writing-text="Typing" chat-title-icon="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Ccircle%20cx='16'%20cy='16'%20r='16'%20fill='%23fff'/%3E%3Cpath%20fill='%230072bc'%20d='M16.5%204c.4%204.2-2.2%206.6-4.4%209.2C10%2015.7%208.8%2018%208.8%2020.6a7.2%207.2%200%200%200%2014.4%200c0-3.200-1.800-5.700-3.400-7.300-.2%201.800-1%203-2.200%203.700.6-4.600-.4-9-1.100-13z'/%3E%3Cpath%20fill='%235fc6ff'%20d='M16%2027a3.800%203.800%200%200%201-3.800-3.800c0-2.100%201.800-3.600%203.800-6%202%202.400%203.800%203.900%203.800%206A3.800%203.800%200%200%201%2016%2027z'/%3E%3C/svg%3E" enable-file-upload enable-audio-input>
     <chat-reset-session-button slot="titlebar-actions" title-text="Start new chat"></chat-reset-session-button>
     <chat-toggle-dialog-button slot="titlebar-actions" title-text-expanded="Collapse" title-text-collapsed="Expand"></chat-toggle-dialog-button>
     <chat-messenger-close-button slot="titlebar-actions" title-text="Close"></chat-messenger-close-button>

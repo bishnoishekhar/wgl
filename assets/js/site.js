@@ -74,7 +74,13 @@
       [/start|stop|move|moving|transfer|meter|connect/, "start-stop-service.html"],
       [/leak|smell|safety|monoxide|co alarm|811|dig|outage|emergency|pilot/, "safety-and-outages.html"],
       [/assist|cares|liheap|waff|help|hardship|shut|disconnect|medical|veap|meap/, "get-assistance.html"],
-      [/rebate|save|saving|energy|assessment|contractor|rinnai|thermostat/, "ways-to-save.html"],
+      [/espa|spanish|hablo|ayuda en/, "espanol.html"],
+      [/business|commercial|abandon|demolition|split meter|added load|gas line/, "business-owners.html"],
+      [/choice|supplier/, "customer-choice.html"],
+      [/damage|claim/, "damage-claims.html"],
+      [/assessment/, "home-energy-assessment.html"],
+      [/rebate|rinnai|contractor|thermostat|empower|dcseu/, "rebates-and-savings.html"],
+      [/save|saving|energy/, "ways-to-save.html"],
       [/contact|phone|call|hours|address|email|mail/, "contact.html"]
     ];
     form.addEventListener("submit", function (e) {

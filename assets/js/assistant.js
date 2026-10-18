@@ -1,23 +1,353 @@
-/* assistant.js - wires every [data-open-assistant] element to the Google CX Agent Studio
-   web widget (<chat-messenger>), and manages the pre-widget placeholder launcher.
+/* assistant.js - Washington Gas mock site: glue between the pages and the Google CX Agent Studio
+   web widget (<chat-messenger>, SDK v1.16), plus the graphical chat cards.
 
-   Behaviour
-   1. If the real widget exists, clicking a [data-open-assistant] element clicks the widget's own
-      launcher bubble (found inside the shadow roots of <chat-messenger-chat-bubble>).
-   2. If the widget is not ready yet it retries for a few seconds.
-   3. If there is no widget at all (snippet not pasted, offline, blocked), it scrolls to and
-      pulses the bottom-right "Chat or call with us" placeholder and shows a short notice.
-   4. The placeholder is hidden automatically as soon as the <chat-messenger> custom element is
-      defined or a <chat-messenger-chat-bubble> is present (class "has-assistant-widget" on <html>).
-   Plain JavaScript, no dependencies. */
+   1. Page context   window.wglPageContext (from <body data-page-context>) is written to sessionStorage
+                     "chat-messenger-variables" as {page_context} BEFORE the widget opens (the SDK reads it on
+                     every request, including the welcome event) and re-applied on session events.
+   2. Launcher       every [data-open-assistant] element opens the widget; placeholder launcher fallback.
+   3. Cards          custom elements <cx-show-...> (one per card tool, same renderer; shadow DOM, inline SVG, no libraries)
+                     rendered inside the chat message list by the SDK from the rich element the platform sends
+                     for a CUSTOM widget tool: {type: custom_template, name: cx-<tool-name>, payload: <card fields>}.
+                     <wgl-card> ({tool, args}) is kept for the preview page and the console.
+   4. Welcome        the WEBSITE greets the visitor when the chat opens (no agent call, no welcome event): a warm
+                     page-aware greeting (renderCustomText) and a chips card with an English | Espanol toggle
+                     (<cx-show-welcome-chips>). Only a chip tap or typed text invokes the agent, with the widget variables
+                     {page_context, ui_language}. Texts: WELCOME below, mirrored from seed/data/verbatim_strings.json
+                     greeting_page_* and the chip lists of the before_model callback (an offline test keeps the three equal).
+   Contract: docs/widget-contract.md. Plain JavaScript, no dependencies.
+   Preview mode: set window.WGL_PREVIEW = true before this script (widget-preview.html) to skip all SDK wiring. */
 (function () {
   "use strict";
   var doc = document;
   var root = doc.documentElement;
+  var PREVIEW = !!window.WGL_PREVIEW;
+  var VARS_KEY = "chat-messenger-variables";
   var fab = null;
   var toast = null;
   var toastTimer = null;
 
+  /* ---------------------------------------------------------------- 1. page context */
+  window.wglPageContext = (doc.body && doc.body.getAttribute("data-page-context")) || "";
+
+  function chatEl() { return doc.querySelector("chat-messenger"); }
+
+  /* ---- UI language chosen with the welcome toggle (en | es): kept for the browser session ---- */
+  var LANG_KEY = "wgl-ui-language";
+  function pageKey() {
+    var p = window.wglPageContext || "home";
+    return WELCOME && WELCOME.pages[p] ? p : "home";
+  }
+  function defaultLang(page) { return page === "spanish" ? "es" : "en"; }
+  function readLang(page) {
+    try {
+      var o = JSON.parse(window.sessionStorage.getItem(LANG_KEY) || "null");
+      /* a choice made elsewhere never overrides the Spanish page's own default */
+      if (o && (o.l === "en" || o.l === "es") && (page !== "spanish" || o.p === "spanish")) { return o.l; }
+    } catch (e) { /* storage blocked */ }
+    return defaultLang(page);
+  }
+  function writeLang(lang, page) {
+    try { window.sessionStorage.setItem(LANG_KEY, JSON.stringify({ l: lang, p: page })); } catch (e) { /* storage blocked */ }
+  }
+
+  /* Merge values into the widget variables (sessionStorage "chat-messenger-variables", read by the SDK on every request). */
+  function setVars(extra) {
+    var obj = {};
+    try {
+      var raw = window.sessionStorage.getItem(VARS_KEY);
+      if (raw) { obj = JSON.parse(raw) || {}; }
+    } catch (e) { obj = {}; }
+    var changed = false;
+    Object.keys(extra).forEach(function (k) { if (obj[k] !== extra[k]) { obj[k] = extra[k]; changed = true; } });
+    if (changed) {
+      try { window.sessionStorage.setItem(VARS_KEY, JSON.stringify(obj)); } catch (e2) { /* storage blocked */ }
+    }
+    var el = chatEl();
+    if (!PREVIEW && el && typeof el.setVariables === "function") {
+      try { el.setVariables(obj); } catch (e3) { /* presenter not ready yet; storage already holds it */ }
+    }
+    return obj;
+  }
+
+  function applyVariables() {
+    var ctx = window.wglPageContext;
+    if (PREVIEW || !ctx) { return; }
+    setVars({ page_context: ctx, ui_language: readLang(ctx) });
+  }
+  applyVariables();   /* synchronous, runs before the deferred SDK script starts */
+
+  /* ---------------------------------------------------------------- 4. welcome texts
+     ONE data structure for the site-rendered welcome (EN and ES per page). Mirrors seed/data/verbatim_strings.json
+     greeting_page_* and the _PAGE_CHIPS lists of the before_model callback; evals/offline_tests/test_site_welcome.py
+     fails when the three drift apart. "notfound" exists on the site only (the callback fallback has no such page). */
+  /* WELCOME-DATA-START */
+  var WELCOME = {
+    "prompt": {
+      "en": "What would you like to do?",
+      "es": "¿Qué le gustaría hacer?"
+    },
+    "pages": {
+      "home": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. How can I help you today?",
+          "chips": [
+            "Pay my bill",
+            "Start or stop service",
+            "Report a gas smell",
+            "Check an outage",
+            "Help with my payment"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. ¿En qué puedo ayudarle hoy?",
+          "chips": [
+            "Pagar mi factura",
+            "Iniciar o detener el servicio",
+            "Reportar olor a gas",
+            "Consultar un corte de servicio",
+            "Ayuda con mi pago"
+          ]
+        }
+      },
+      "billing": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our billing page. How can I help with your bill today?",
+          "chips": [
+            "Pay my bill",
+            "Why is my bill high?",
+            "Set up AutoPay",
+            "Payment plans and help"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de facturación. ¿En qué puedo ayudarle con su factura hoy?",
+          "chips": [
+            "Pagar mi factura",
+            "¿Por qué mi factura es alta?",
+            "Configurar AutoPay",
+            "Planes de pago y ayuda"
+          ]
+        }
+      },
+      "service": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our service page. How can I help with your service today?",
+          "chips": [
+            "Start service",
+            "Stop service",
+            "I am moving",
+            "Is gas available at my address"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de servicio. ¿En qué puedo ayudarle con su servicio hoy?",
+          "chips": [
+            "Iniciar servicio",
+            "Detener servicio",
+            "Me estoy mudando",
+            "¿Hay gas disponible en mi dirección?"
+          ]
+        }
+      },
+      "safety": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our safety page. If you smell gas, leave the area right away, call 911, then Washington Gas at 844-WASHGAS, 844-927-4427, option 1. Tap Report a gas smell for help.",
+          "chips": [
+            "Report a gas smell",
+            "My gas is off",
+            "Carbon monoxide alarm",
+            "Call before you dig (811)"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de seguridad. Si huele a gas, salga del área de inmediato y llame al 911 y luego a Washington Gas al 844-WASHGAS, 844-927-4427, opción 1. Toque Reportar olor a gas para recibir ayuda.",
+          "chips": [
+            "Reportar olor a gas",
+            "Mi gas está apagado",
+            "Alarma de monóxido de carbono",
+            "Llame antes de excavar (811)"
+          ]
+        }
+      },
+      "assistance": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our assistance page. I can help you find ways to manage your bill. What would you like to know?",
+          "chips": [
+            "Help paying my bill",
+            "Payment plans",
+            "Energy assistance programs",
+            "Medical or special needs"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de asistencia. Puedo ayudarle a encontrar formas de manejar su factura. ¿Qué le gustaría saber?",
+          "chips": [
+            "Ayuda para pagar mi factura",
+            "Planes de pago",
+            "Programas de asistencia de energía",
+            "Necesidades médicas o especiales"
+          ]
+        }
+      },
+      "savings": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our savings page. How can I help you save today?",
+          "chips": [
+            "Rebates and how to claim",
+            "Home energy assessment",
+            "Budget Billing"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de ahorros. ¿Cómo puedo ayudarle a ahorrar hoy?",
+          "chips": [
+            "Reembolsos y cómo solicitarlos",
+            "Evaluación de energía del hogar",
+            "Facturación presupuestada"
+          ]
+        }
+      },
+      "business": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our business page. How can I help with your business account today?",
+          "chips": [
+            "Start service for my business",
+            "Pay my bill",
+            "Added load or split meter",
+            "Service abandonment"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página para negocios. ¿En qué puedo ayudarle con su cuenta comercial hoy?",
+          "chips": [
+            "Iniciar servicio para mi negocio",
+            "Pagar mi factura",
+            "Carga adicional o medidor dividido",
+            "Abandono de servicio"
+          ]
+        }
+      },
+      "choice": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our Customer Choice page. What would you like to know?",
+          "chips": [
+            "How Customer Choice works",
+            "Pay my bill",
+            "Start or stop service"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de Customer Choice. ¿Qué le gustaría saber?",
+          "chips": [
+            "Cómo funciona Customer Choice",
+            "Pagar mi factura",
+            "Iniciar o detener el servicio"
+          ]
+        }
+      },
+      "claims": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our claims page. How can I help?",
+          "chips": [
+            "Report damage",
+            "Safety information",
+            "Talk to a person"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de reclamos. ¿En qué puedo ayudarle?",
+          "chips": [
+            "Reportar daños",
+            "Información de seguridad",
+            "Hablar con una persona"
+          ]
+        }
+      },
+      "energy": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our energy efficiency page. How can I help you use less energy today?",
+          "chips": [
+            "Home energy assessment",
+            "Budget Billing",
+            "Rebates"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de eficiencia energética. ¿Cómo puedo ayudarle a usar menos energía hoy?",
+          "chips": [
+            "Evaluación de energía del hogar",
+            "Facturación presupuestada",
+            "Reembolsos"
+          ]
+        }
+      },
+      "contact": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I see you are on our contact page. How can I help you today?",
+          "chips": [
+            "Pay my bill",
+            "Report a gas smell",
+            "Talk to a person"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Veo que está en nuestra página de contacto. ¿En qué puedo ayudarle hoy?",
+          "chips": [
+            "Pagar mi factura",
+            "Reportar olor a gas",
+            "Hablar con una persona"
+          ]
+        }
+      },
+      "spanish": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I can help you in Spanish. How can I help you today?",
+          "chips": [
+            "Pay my bill",
+            "Start or stop service",
+            "Report a gas smell",
+            "Check an outage",
+            "Help with my payment"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. Con gusto le ayudo en español. ¿En qué puedo ayudarle hoy?",
+          "chips": [
+            "Pagar mi factura",
+            "Iniciar o detener el servicio",
+            "Reportar olor a gas",
+            "Consultar un corte de servicio",
+            "Ayuda con mi pago"
+          ]
+        }
+      },
+      "notfound": {
+        "en": {
+          "greeting": "Welcome to Washington Gas. I could not find that page, but I can still help. What would you like to do?",
+          "chips": [
+            "Pay my bill",
+            "Start or stop service",
+            "Report a gas smell",
+            "Check an outage",
+            "Help with my payment"
+          ]
+        },
+        "es": {
+          "greeting": "Bienvenido a Washington Gas. No encontré esa página, pero aún puedo ayudarle. ¿Qué le gustaría hacer?",
+          "chips": [
+            "Pagar mi factura",
+            "Iniciar o detener el servicio",
+            "Reportar olor a gas",
+            "Consultar un corte de servicio",
+            "Ayuda con mi pago"
+          ]
+        }
+      }
+    }
+  };
+  /* WELCOME-DATA-END */
+
+  /* ---------------------------------------------------------------- 2. launcher */
   function widgetPresent() {
     return !!(window.customElements && customElements.get("chat-messenger")) ||
            !!doc.querySelector("chat-messenger-chat-bubble");
@@ -25,11 +355,8 @@
   function syncPlaceholder() {
     if (widgetPresent()) { root.classList.add("has-assistant-widget"); }
   }
-
-  /* Find the launcher button inside the bubble's shadow DOM (class names can change between SDK
-     versions, so try a few candidates and finally any button). */
   function findLauncher() {
-    var host = doc.querySelector("chat-messenger");
+    var host = chatEl();
     if (!host) { return null; }
     var bubble = host.querySelector("chat-messenger-chat-bubble") ||
                  (host.shadowRoot && host.shadowRoot.querySelector("chat-messenger-chat-bubble"));
@@ -39,10 +366,8 @@
     return { bubble: bubble, button: btn || null };
   }
   function isAlreadyOpen(l) {
-    /* The bubble host gets class "hidden" while the chat window is open. */
     return !!(l && l.bubble && l.bubble.classList.contains("hidden"));
   }
-
   function showToast(msg) {
     if (!toast) { return; }
     toast.textContent = msg;
@@ -58,11 +383,9 @@
     fab.classList.add("pulse");
     showToast("The assistant widget is not connected on this page yet. Paste the embed code into assets/js/widget-embed.html and run scripts/build_pages.py.");
   }
-
   function openAssistant(attempt) {
     attempt = attempt || 0;
     var l = findLauncher();
-    /* Preferred: the bubble element exposes a reactive boolean property "expanded" (SDK v1.16). */
     if (l && l.bubble && "expanded" in l.bubble && l.bubble.shadowRoot) {
       l.bubble.expanded = true;
       return;
@@ -70,8 +393,7 @@
     if (l && isAlreadyOpen(l)) { return; }
     if (l && l.button) { l.button.click(); return; }
     if (l && l.bubble && typeof l.bubble.click === "function") { l.bubble.click(); return; }
-    /* element is defined but not rendered yet, or the script is still loading */
-    if ((doc.querySelector("chat-messenger") && attempt < 16) &&
+    if ((chatEl() && attempt < 16) &&
         (window.customElements && customElements.get("chat-messenger") || attempt < 8)) {
       setTimeout(function () { openAssistant(attempt + 1); }, 250);
       return;
@@ -79,25 +401,633 @@
     fallback();
   }
 
+  /* ---------------------------------------------------------------- 3. cards */
+  var BRAND = { navy: "#002a5c", blue: "#0072bc", gold: "#ffc72c" };
+  var DONUT_COLORS = ["#002a5c", "#0072bc", "#4eaf6b", "#b45309", "#6b4fa3", "#5b6770"];
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  function esc(v) {
+    return String(v === undefined || v === null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function money(v) {
+    var n = num(v);
+    var s = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return (n < 0 ? "-$" : "$") + s;
+  }
+  function plain(v) { var n = num(v); return (Math.round(n * 10) / 10).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  function shortLabel(p) {
+    var s = String(p === undefined || p === null ? "" : p).trim();
+    var m = s.match(/^[A-Za-z]{3,}/);
+    if (m) { return m[0].slice(0, 3); }
+    m = s.match(/^(\d{4})-(\d{2})/);
+    if (m) { return MONTHS[Number(m[2]) - 1] || s.slice(0, 3); }
+    return s.slice(0, 3);
+  }
+  function arr(v, max) { return Array.isArray(v) ? v.slice(0, max || 50) : []; }
+  function row(label, value) {
+    return value === undefined || value === null || value === "" ? "" :
+      '<div class="kv"><span class="k">' + esc(label) + '</span><span class="v">' + esc(value) + "</span></div>";
+  }
+  function head(title, sub, icon) {
+    return '<div class="card-head">' + (icon ? '<span class="ico" aria-hidden="true">' + icon + "</span>" : "") +
+      '<div class="ht"><div class="title">' + esc(title) + "</div>" + (sub ? '<div class="sub">' + esc(sub) + "</div>" : "") + "</div></div>";
+  }
+  function empty(msg) { return '<p class="empty">' + esc(msg || "This information is not available right now.") + "</p>"; }
+
+  var ICON = {
+    chart: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 20V10h4v10H4zm6 0V4h4v16h-4zm6 0v-7h4v7h-4z"/></svg>',
+    flame: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12.5 2c.4 3.200-1.700 5-3.300 6.900C7.700 10.700 6.800 12.400 6.800 14.400a5.400 5.400 0 0 0 10.800 0c0-2.400-1.300-4.300-2.600-5.500-.1 1.400-.8 2.300-1.700 2.800.5-3.400-.3-6.700-.8-9.700z"/></svg>',
+    check: '<svg viewBox="0 0 24 24" width="22" height="22"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 12.500l4.500 4.500L19 7.500"/></svg>',
+    cal: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm-2 8h14v9H5v-9z"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2 1 21h22L12 2zm-1 7h2v6h-2V9zm0 8h2v2h-2v-2z"/></svg>',
+    tag: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 12V3h9l9 9-9 9-9-9zm5-5a1.500 1.500 0 1 0 0 3 1.500 1.500 0 0 0 0-3z"/></svg>',
+    cloud: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6.500 19a4.500 4.500 0 0 1-.4-9A6 6 0 0 1 17.600 8.500 4.800 4.800 0 0 1 17.500 19h-11z"/></svg>',
+    dollar: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15.500V19h-2v-1.500c-1.500-.3-2.700-1.200-2.800-2.800h2c.1.700.8 1.200 1.900 1.200 1 0 1.700-.4 1.700-1.100 0-.7-.5-1-2-1.400-1.900-.5-3.400-1.200-3.400-3.100 0-1.400 1.100-2.400 2.600-2.700V5h2v1.700c1.400.3 2.400 1.300 2.500 2.700h-2c-.1-.7-.7-1.100-1.700-1.100-.9 0-1.500.4-1.500 1 0 .6.5.9 2 1.300 1.800.5 3.500 1.100 3.500 3.200 0 1.500-1.200 2.500-2.800 2.700z"/></svg>'
+  };
+
+  /* ---- chart builders (inline SVG) ---- */
+  function svgOpen(w, h, label) {
+    return '<svg class="chart" viewBox="0 0 ' + w + " " + h + '" role="img" aria-label="' + esc(label) + '" preserveAspectRatio="xMidYMid meet">';
+  }
+  function barChart(o) {
+    var vals = o.values, n = vals.length;
+    if (!n) { return empty(); }
+    var W = 320, H = 150, pl = 8, pr = 8, pt = 24, pb = 22, base = H - pb;
+    var max = Math.max.apply(null, vals); if (max <= 0) { max = 1; }
+    var slot = (W - pl - pr) / n, bw = Math.min(24, slot * 0.62);
+    var maxI = vals.indexOf(Math.max.apply(null, vals));
+    var s = svgOpen(W, H, o.aria);
+    s += '<line x1="' + pl + '" y1="' + base + '" x2="' + (W - pr) + '" y2="' + base + '" stroke="#9fb6cc" stroke-width="1"/>';
+    for (var i = 0; i < n; i++) {
+      var h = Math.max(2, (vals[i] / max) * (base - pt));
+      var x = pl + slot * i + (slot - bw) / 2, y = base - h;
+      var cur = i === o.cur;
+      s += '<g class="bar" style="animation-delay:' + (i * 35) + 'ms"><title>' + esc(o.labels[i] + ": " + o.fmt(vals[i])) + "</title>" +
+        '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="3" fill="' + (cur ? BRAND.navy : BRAND.blue) + '"/>' +
+        (cur ? '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="4" rx="2" fill="' + BRAND.gold + '"/>' : "") + "</g>";
+      s += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="ax' + (cur ? " cur" : "") + '">' + esc(shortLabel(o.labels[i])) + "</text>";
+      if (cur || i === maxI) {
+        s += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle" class="val' + (cur ? " cur" : "") + '">' + esc(o.fmt(vals[i])) + "</text>";
+      }
+    }
+    return s + "</svg>";
+  }
+  function weatherChart(months, unit) {
+    var n = months.length;
+    if (!n) { return empty(); }
+    var W = 320, H = 170, pl = 8, pr = 8, pt = 26, pb = 22, base = H - pb;
+    var uMax = Math.max.apply(null, months.map(function (m) { return num(m.usage); })) || 1;
+    var hMax = Math.max.apply(null, months.map(function (m) { return num(m.hdd); })) || 1;
+    var slot = (W - pl - pr) / n, bw = Math.min(22, slot * 0.6);
+    var s = svgOpen(W, H, "Usage in " + unit + " compared with heating degree days by month: " +
+      months.map(function (m) { return m.period + " " + plain(m.usage) + " " + unit + ", " + plain(m.hdd) + " degree days"; }).join("; "));
+    s += '<line x1="' + pl + '" y1="' + base + '" x2="' + (W - pr) + '" y2="' + base + '" stroke="#9fb6cc"/>';
+    var pts = [];
+    months.forEach(function (m, i) {
+      var h = Math.max(2, (num(m.usage) / uMax) * (base - pt));
+      var x = pl + slot * i + (slot - bw) / 2, y = base - h, cx = x + bw / 2;
+      s += '<g class="bar" style="animation-delay:' + (i * 35) + 'ms"><title>' + esc(m.period + ": " + plain(m.usage) + " " + unit + ", " + plain(m.hdd) + " HDD") + "</title>" +
+        '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="3" fill="' + BRAND.blue + '"/></g>';
+      s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="ax">' + esc(shortLabel(m.period)) + "</text>";
+      pts.push([cx, base - (num(m.hdd) / hMax) * (base - pt)]);
+    });
+    var d = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
+    s += '<path class="line" d="' + d + '" fill="none" stroke="#b45309" stroke-width="2.500" stroke-linejoin="round" stroke-linecap="round"/>';
+    pts.forEach(function (p) { s += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3" fill="#fff" stroke="#b45309" stroke-width="2"/>'; });
+    return s + "</svg>";
+  }
+  function donut(items, total, aria) {
+    var R = 46, C = 2 * Math.PI * R, sum = items.reduce(function (a, b) { return a + Math.max(0, b.amount); }, 0) || 1;
+    var s = svgOpen(140, 140, aria) + '<g transform="rotate(-90 70 70)"><circle cx="70" cy="70" r="' + R + '" fill="none" stroke="#e6eef5" stroke-width="18"/>';
+    var off = 0;
+    items.forEach(function (it, i) {
+      var len = (Math.max(0, it.amount) / sum) * C;
+      s += '<circle class="seg" cx="70" cy="70" r="' + R + '" fill="none" stroke="' + DONUT_COLORS[i % DONUT_COLORS.length] +
+        '" stroke-width="18" stroke-dasharray="' + Math.max(0, len - 1.5).toFixed(2) + " " + (C - Math.max(0, len - 1.5)).toFixed(2) +
+        '" stroke-dashoffset="' + (-off).toFixed(2) + '"><title>' + esc(it.label + ": " + money(it.amount)) + "</title></circle>";
+      off += len;
+    });
+    s += '</g><text x="70" y="66" text-anchor="middle" class="dl">Total</text><text x="70" y="86" text-anchor="middle" class="dv">' + esc(money(total)) + "</text></svg>";
+    return s;
+  }
+  function stars(prompt) {
+    var s = "";
+    for (var i = 1; i <= 5; i++) {
+      s += '<button type="button" class="star" data-send="I rate this experience ' + i + ' out of 5" aria-label="' + i + ' out of 5">' +
+        '<svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 2.500l2.900 6.200 6.700.8-5 4.600 1.400 6.700L12 17.400 6 20.800l1.400-6.700-5-4.600 6.700-.8L12 2.500z" fill="currentColor"/></svg></button>';
+    }
+    return s;
+  }
+  function actionBtn(label, msg, cls) {
+    return label && msg ? '<button type="button" class="btn ' + (cls || "") + '" data-send="' + esc(msg) + '">' + esc(label) + "</button>" : "";
+  }
+
+  /* severity -> badge text, class, glyph (never colour alone) */
+  var SEV = {
+    info: { t: "Good to know", g: "i" },
+    attention: { t: "Needs attention", g: "!" },
+    urgent: { t: "Urgent", g: "!" },
+    saving: { t: "Saving", g: "$" }
+  };
+
+  function carousel(slides, label) {
+    var s = '<div class="car" role="group" aria-roledescription="carousel" aria-label="' + esc(label) + '">' +
+      '<div class="track" tabindex="0">' + slides.map(function (h, i) {
+        return '<div class="slide" role="group" aria-roledescription="slide" aria-label="' + (i + 1) + " of " + slides.length + '">' + h + "</div>";
+      }).join("") + "</div>";
+    if (slides.length > 1) {
+      s += '<button type="button" class="nav prev" data-nav="-1" aria-label="Previous">&#8249;</button><button type="button" class="nav next" data-nav="1" aria-label="Next">&#8250;</button>' +
+        '<div class="dots" aria-hidden="true">' + slides.map(function (_, i) { return '<i class="' + (i ? "" : "on") + '"></i>'; }).join("") + "</div>";
+    }
+    return s + "</div>";
+  }
+
+  /* ---- card definitions: tool name -> function(args) -> HTML ---- */
+  var CARDS = {
+    show_usage_history_card: function (a) {
+      var ms = arr(a.months, 13), unit = a.unit || "units";
+      if (!ms.length) { return head("Your usage", "", ICON.flame) + empty(); }
+      var vals = ms.map(function (m) { return num(m.usage); });
+      var hi = vals.indexOf(Math.max.apply(null, vals)), lo = vals.indexOf(Math.min.apply(null, vals));
+      return head("Your gas usage", "Last " + ms.length + " months, in " + unit, ICON.flame) +
+        barChart({ values: vals, labels: ms.map(function (m) { return m.period; }), cur: ms.length - 1, fmt: plain,
+          aria: "Gas usage in " + unit + " by month: " + ms.map(function (m) { return m.period + " " + plain(m.usage); }).join(", ") }) +
+        '<div class="stats"><div><span class="k">Highest</span><b>' + esc(shortLabel(ms[hi].period)) + " " + esc(plain(vals[hi])) + '</b></div>' +
+        '<div><span class="k">Lowest</span><b>' + esc(shortLabel(ms[lo].period)) + " " + esc(plain(vals[lo])) + "</b></div></div>";
+    },
+    show_bill_trend_card: function (a) {
+      var ms = arr(a.months, 13);
+      if (!ms.length) { return head("Your bill by month", "", ICON.chart) + empty(); }
+      var cur = -1;
+      ms.forEach(function (m, i) { if (m.is_current) { cur = i; } });
+      if (cur < 0) { cur = ms.length - 1; }
+      var follow = a.action_label && a.action_message ?
+        '<div class="chips follow" role="group" aria-label="Next step" data-lock="1"><button type="button" class="chip" data-send="' + esc(a.action_message) + '">' + esc(a.action_label) + "</button></div>" : "";
+      return head("Your bill, month by month", "Amount billed each month", ICON.chart) +
+        barChart({ values: ms.map(function (m) { return num(m.amount); }), labels: ms.map(function (m) { return m.period; }), cur: cur, fmt: money,
+          aria: "Monthly bill amounts: " + ms.map(function (m) { return m.period + " " + money(m.amount); }).join(", ") }) +
+        (a.highlight_note ? '<p class="note"><span aria-hidden="true">&#9679;</span> ' + esc(a.highlight_note) + "</p>" : "") + follow;
+    },
+    show_weather_usage_card: function (a) {
+      var ms = arr(a.months, 13), unit = a.unit || "units";
+      if (!ms.length) { return head("Usage and weather", "", ICON.cloud) + empty(); }
+      return head("Usage vs. the weather", "Colder months need more heat", ICON.cloud) + weatherChart(ms, unit) +
+        '<div class="legend"><span><i class="sw bar"></i>Gas used (' + esc(unit) + ')</span><span><i class="sw ln"></i>Heating degree days</span></div>';
+    },
+    show_bill_breakdown_card: function (a) {
+      var items = arr(a.items, 40).map(function (i) { return { label: i.label, amount: num(i.amount) }; });
+      if (!items.length) { return head("Bill breakdown", "", ICON.dollar) + empty(); }
+      if (items.length > 6) {
+        var rest = items.slice(5).reduce(function (x, y) { return x + y.amount; }, 0);
+        items = items.slice(0, 5).concat([{ label: "Other", amount: rest }]);
+      }
+      var total = a.total !== undefined && a.total !== null ? num(a.total) : items.reduce(function (x, y) { return x + y.amount; }, 0);
+      return head("Where your money goes", "This bill", ICON.dollar) + '<div class="donut-row">' +
+        donut(items, total, "Bill breakdown: " + items.map(function (i) { return i.label + " " + money(i.amount); }).join(", ") + ". Total " + money(total)) +
+        '<ul class="lg">' + items.map(function (it, i) {
+          return '<li><i class="sw" style="background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '"></i><span class="lb">' + esc(it.label) +
+            '</span><b>' + esc(money(it.amount)) + "</b></li>";
+        }).join("") + "</ul></div>";
+    },
+    show_insights_carousel: function (a) {
+      var ins = arr(a.insights, 6);
+      if (!ins.length) { return head("Insights for you", "", ICON.flame) + empty(); }
+      return carousel(ins.map(function (i) {
+        var sv = SEV[i.severity] ? i.severity : "info", d = SEV[sv];
+        return '<div class="ins sev-' + sv + '"><span class="badge"><b aria-hidden="true">' + d.g + "</b> " + d.t + "</span>" +
+          '<div class="title">' + esc(i.title) + '</div><p class="sum">' + esc(i.summary) + "</p>" +
+          actionBtn(i.action_label, i.action_message, "") + "</div>";
+      }), "Insights for you");
+    },
+    show_rebate_card: function (a) {
+      var rs = arr(a.rebates, 6);
+      if (!rs.length) { return head("Rebates for you", "", ICON.tag) + empty(); }
+      return head("Rebates you may qualify for", rs.length + " match" + (rs.length > 1 ? "es" : ""), ICON.tag) +
+        '<div class="stack">' + rs.map(function (r) {
+          return '<div class="rb"><div class="rb-top"><div class="rb-name">' + esc(r.name) + '</div><div class="rb-amt">' + esc(r.amount) + "</div></div>" +
+            (r.deadline ? '<div class="rb-dl"><span aria-hidden="true">&#9201;</span> Claim by ' + esc(r.deadline) + "</div>" : "") +
+            (r.status_note ? '<div class="rb-note">' + esc(r.status_note) + "</div>" : "") +
+            actionBtn(r.action_label, r.action_message, "") + "</div>";
+        }).join("") + "</div>";
+    },
+    show_claim_status_card: function (a) {
+      var st = arr(a.steps, 8);
+      if (!st.length) { return head("Claim status", "", ICON.check) + empty(); }
+      return head("Claim status", a.claim_id ? "Claim " + a.claim_id : "", ICON.check) + '<ol class="steps">' + st.map(function (s, i) {
+        var state = s.state === "done" || s.state === "current" ? s.state : "todo";
+        var word = state === "done" ? "Done" : state === "current" ? "In progress" : "Next";
+        return '<li class="step ' + state + '"><span class="dot" aria-hidden="true">' + (state === "done" ? ICON.check : (i + 1)) + '</span>' +
+          '<span class="sl">' + esc(s.label) + '</span><span class="sw2">' + word + "</span></li>";
+      }).join("") + "</ol>" + (a.note ? '<p class="note">' + esc(a.note) + "</p>" : "");
+    },
+    show_payment_receipt_card: function (a) {
+      return '<div class="receipt"><span class="okc" aria-hidden="true">' + ICON.check + '</span><div class="rt">Payment received</div>' +
+        '<div class="ramt">' + esc(money(a.amount)) + "</div>" +
+        '<div class="tear" aria-hidden="true"></div>' +
+        row("Date", a.date) + row("Confirmation", a.confirmation) + row("Paid with", a.method_last4 ? "Card ending " + a.method_last4 : "") + "</div>";
+    },
+    show_bill_summary_card: function (a) {
+      return head(a.title || "Bill summary", "", ICON.dollar) + '<div class="ramt left">' + esc(money(a.amount)) + "</div>" +
+        (a.convenience_fee ? row("Convenience fee", money(a.convenience_fee)) : "") + row("Due date", a.due_date) +
+        row("Confirmation", a.confirmation_number) + row("Card", a.card_last4 ? "Ending " + a.card_last4 : "");
+    },
+    show_quick_actions: function (a) {
+      var o = arr(a.options, 3);
+      return '<div class="chips" role="group" aria-label="' + esc(a.prompt || "Quick answers") + '" data-lock="1">' + o.map(function (t) {
+        return '<button type="button" class="chip" data-send="' + esc(t) + '">' + esc(t) + "</button>";
+      }).join("") + "</div>";
+    },
+    show_welcome_chips: function (a) {
+      var page = WELCOME.pages[a.page] ? a.page : "home";
+      var lang = a.lang === "es" ? "es" : "en";
+      var w = WELCOME.pages[page][lang];
+      var off = a.sent ? " disabled" : "";
+      var tog = function (code, label, name) {
+        return '<button type="button" class="lang' + (lang === code ? " on" : "") + '" data-lang="' + code + '" lang="' + code + '" aria-pressed="' + (lang === code) +
+          '" aria-label="' + name + '"' + off + ">" + label + "</button>";
+      };
+      /* the greeting bubble above is rendered by the SDK in the opening language: after a switch, the new-language greeting
+         is repeated inside the card so the visitor reads the page in the language they picked */
+      var note = lang !== a.initial ? '<p class="lnote" lang="' + lang + '">' + esc(w.greeting) + "</p>" : "";
+      return '<div class="wel' + (a.sent ? " sent" : "") + '"><div class="langrow" role="group" aria-label="Language / Idioma"><span class="globe" aria-hidden="true">&#127760;</span>' +
+        tog("en", "English", "English") + '<span class="sep" aria-hidden="true">|</span>' + tog("es", "Espa&ntilde;ol", "Espa&ntilde;ol") + "</div>" +
+        '<div class="live" role="status" aria-live="polite">' + note + "</div>" +
+        '<div class="chips" role="group" aria-label="' + esc(WELCOME.prompt[lang]) + '" data-lock="1">' + w.chips.map(function (t) {
+          return '<button type="button" class="chip' + (a.picked === t ? " picked" : "") + '" data-send="' + esc(t) + '"' + off + ">" + esc(t) + "</button>";
+        }).join("") + "</div></div>";
+    },
+    show_slot_picker: function (a) {
+      var sl = arr(a.slots, 3);
+      if (!sl.length) { return head("Choose a time", "", ICON.cal) + empty("No times are available right now."); }
+      return head("Choose a time", a.service_type ? "Appointment: " + a.service_type : "", ICON.cal) + '<div class="slots" data-lock="1">' + sl.map(function (s) {
+        var msg = s.action_message || ("I'll take " + [s.date, s.window].filter(Boolean).join(", ") + (s.slot ? " (slot " + s.slot + ")" : ""));
+        return '<button type="button" class="slot" data-send="' + esc(msg) + '"><span class="sd">' + esc(s.date) + '</span><span class="sw3">' + esc(s.window) + "</span></button>";
+      }).join("") + "</div>";
+    },
+    show_appointment_confirmation: function (a) {
+      var nums = arr(a.confirmation_numbers, 4).join(", ");
+      return '<div class="receipt appt"><span class="okc" aria-hidden="true">' + ICON.cal + '</span><div class="rt">Appointment confirmed</div>' +
+        '<div class="ramt sm">' + esc(a.date) + "</div>" + '<div class="tear" aria-hidden="true"></div>' +
+        row("Arrival window", a.window) + row("Service", a.service_type) + row("Address", a.address) + row("Confirmation", nums) + "</div>";
+    },
+    show_emergency_card: function (a) {
+      /* the agent leaves emergency_number empty unless the escalation line is down: fall back to the last phone number in the text */
+      var found = String(a.safety_text || "").match(/\d{3}-\d{3}-\d{4}/g);
+      a.emergency_number = a.emergency_number || (found ? found[found.length - 1] : "");
+      var tel = String(a.emergency_number || "").replace(/[^0-9+]/g, "");
+      return '<div class="emerg" role="alert"><div class="eh"><span aria-hidden="true">' + ICON.alert + "</span> Gas emergency</div>" +
+        '<p class="et">' + esc(a.safety_text) + "</p>" +
+        (tel ? '<a class="ecall" href="tel:' + esc(tel) + '">Call ' + esc(a.emergency_number) + "</a>" : "") + "</div>";
+    },
+    show_csat_card: function (a) {
+      return head(a.prompt || "How did we do?", "Tap a star", "") + '<div class="stars" data-lock="1">' + stars() + "</div>";
+    }
+  };
+  var WGL_TOOLS = Object.keys(CARDS);
+
+  var CARD_CSS =
+    ":host{display:block;width:100%;font-family:inherit;color:#002a5c;--navy:#002a5c;--blue:#0072bc;--gold:#ffc72c;--pale:#f3fafe;--line:#d3e3f1;--ink2:#495057}" +
+    "*{box-sizing:border-box}" +
+    ".card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 6px 18px rgba(0,42,92,.10);animation:rise .38s cubic-bezier(.2,.8,.2,1) both;overflow:hidden}" +
+    ".card.bare{padding:0;background:transparent;border:0;box-shadow:none}" +
+    "@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}" +
+    "@keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}" +
+    "@keyframes draw{from{stroke-dashoffset:600}to{stroke-dashoffset:0}}" +
+    ".card-head{display:flex;gap:10px;align-items:center;margin-bottom:10px}" +
+    ".ico{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,#002a5c,#0072bc);color:#fff}" +
+    ".ico svg{display:block}" +
+    ".title{font-weight:700;font-size:15px;line-height:1.25}" +
+    ".sub{font-size:12px;color:var(--ink2);margin-top:1px}" +
+    ".chart{width:100%;height:auto;display:block;overflow:visible}" +
+    ".bar{transform-box:fill-box;transform-origin:50% 100%;animation:grow .55s cubic-bezier(.2,.8,.2,1) both}" +
+    ".line{stroke-dasharray:600;animation:draw 1s .3s ease-out both}" +
+    ".seg{animation:fade .6s ease both}@keyframes fade{from{opacity:0}to{opacity:1}}" +
+    ".ax{font-size:9.5px;fill:#495057;font-family:inherit}.ax.cur{fill:#002a5c;font-weight:700}" +
+    ".val{font-size:10.5px;fill:#002a5c;font-weight:700;font-family:inherit}" +
+    ".dl{font-size:10px;fill:#495057}.dv{font-size:16px;font-weight:800;fill:#002a5c}" +
+    ".stats{display:flex;gap:10px;margin-top:8px}.stats>div{flex:1;background:var(--pale);border:1px solid #c0ecff;border-radius:10px;padding:6px 10px;font-size:13px}" +
+    ".stats .k{display:block;font-size:11px;color:var(--ink2)}" +
+    ".note{margin:10px 0 0;padding:8px 10px;background:#fff8e1;border-left:4px solid var(--gold);border-radius:8px;font-size:13px;line-height:1.35}" +
+    ".legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--ink2);margin-top:6px}.legend span{display:inline-flex;align-items:center;gap:6px}" +
+    ".sw{display:inline-block;width:12px;height:12px;border-radius:3px;flex:none}.sw.bar{background:var(--blue);animation:none}.sw.ln{height:3px;width:16px;background:#b45309;border-radius:2px}" +
+    ".donut-row{display:flex;gap:12px;align-items:center}.donut-row .chart{width:128px;flex:none}" +
+    ".lg{list-style:none;margin:0;padding:0;flex:1;min-width:0;font-size:13px}.lg li{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #e9f0f6}.lg li:last-child{border:0}" +
+    ".lg .lb{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lg b{font-variant-numeric:tabular-nums}" +
+    ".car{position:relative}.track{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;padding:2px 2px 6px;border-radius:12px;outline-offset:2px}" +
+    ".track::-webkit-scrollbar{display:none}.slide{flex:0 0 88%;scroll-snap-align:center}" +
+    ".nav{position:absolute;bottom:-5px;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--navy);font-size:20px;line-height:1;cursor:pointer;box-shadow:0 2px 8px rgba(0,42,92,.2);display:grid;place-items:center;padding:0 0 3px}" +
+    ".nav.prev{left:calc(50% - 64px)}.nav.next{right:calc(50% - 64px)}.nav:hover{background:var(--pale)}" +
+    ".dots{display:flex;justify-content:center;align-items:center;gap:6px;margin-top:4px;height:28px}.dots i{width:7px;height:7px;border-radius:50%;background:#b6c8d9;transition:all .2s}.dots i.on{background:var(--navy);width:18px;border-radius:4px}" +
+    ".ins{height:100%;background:#fff;border:1px solid var(--line);border-left:5px solid var(--blue);border-radius:14px;padding:12px;box-shadow:0 6px 16px rgba(0,42,92,.10);display:flex;flex-direction:column;gap:6px}" +
+    ".ins .badge{align-self:flex-start;font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px 2px 5px;background:#e3f1fb;color:#00406f;display:inline-flex;align-items:center;gap:5px}" +
+    ".ins .badge b{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:#00406f;color:#fff;font-size:10px}" +
+    ".ins.sev-attention{border-left-color:#d98a00}.ins.sev-attention .badge{background:#fff0cc;color:#6b4500}.ins.sev-attention .badge b{background:#6b4500}" +
+    ".ins.sev-urgent{border-left-color:#c8261b}.ins.sev-urgent .badge{background:#fde3e1;color:#8a1810}.ins.sev-urgent .badge b{background:#8a1810}" +
+    ".ins.sev-saving{border-left-color:#2f8a4d}.ins.sev-saving .badge{background:#def4e5;color:#1d5b33}.ins.sev-saving .badge b{background:#1d5b33}" +
+    ".sum{margin:0;font-size:13px;line-height:1.4;color:#33414f;flex:1}" +
+    ".btn{font:inherit;font-weight:700;font-size:13px;padding:8px 14px;border-radius:10px;border:2px solid var(--navy);background:var(--navy);color:#fff;cursor:pointer;align-self:flex-start;transition:transform .12s,background .15s,box-shadow .15s}" +
+    ".btn:hover{background:#00408a;box-shadow:0 3px 0 var(--gold)}.btn:active{transform:translateY(1px)}" +
+    "button:focus-visible,a:focus-visible,.track:focus-visible{outline:3px solid var(--gold);box-shadow:0 0 0 5px var(--navy)}" +
+    ".stack{display:flex;flex-direction:column;gap:10px}" +
+    ".rb{border:1px solid var(--line);background:var(--pale);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:5px}" +
+    ".rb-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.rb-name{font-weight:700;font-size:14px}" +
+    ".rb-amt{flex:none;font-weight:800;font-size:15px;background:var(--gold);color:var(--navy);border-radius:8px;padding:2px 8px}" +
+    ".rb-dl{font-size:12px;color:#7a3e00;font-weight:600}.rb-note{font-size:13px;color:#33414f}" +
+    ".steps{list-style:none;margin:0;padding:0}.step{display:flex;align-items:center;gap:10px;position:relative;padding:6px 0;font-size:14px}" +
+    ".step:not(:last-child)::after{content:'';position:absolute;left:13px;top:32px;bottom:-6px;width:2px;background:#c5d6e6}.step.done:not(:last-child)::after{background:var(--blue)}" +
+    ".dot{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;border:2px solid #9fb6cc;background:#fff;color:#495057;z-index:1}" +
+    ".step.done .dot{background:var(--blue);border-color:var(--blue);color:#fff}.step.done .dot svg{width:15px;height:15px}" +
+    ".step.current .dot{border-color:var(--navy);background:var(--gold);color:var(--navy);animation:pulse 1.8s infinite}" +
+    "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,199,44,.7)}70%{box-shadow:0 0 0 9px rgba(255,199,44,0)}100%{box-shadow:0 0 0 0 rgba(255,199,44,0)}}" +
+    ".sl{flex:1;font-weight:600}.step.todo .sl{font-weight:400;color:var(--ink2)}.sw2{font-size:11px;color:var(--ink2);font-weight:600}" +
+    ".receipt{text-align:center;background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 16px 12px;box-shadow:0 6px 18px rgba(0,42,92,.10);animation:rise .38s both}" +
+    ".okc{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:50%;background:#2f8a4d;color:#fff;margin-bottom:6px;animation:pop .45s .1s cubic-bezier(.3,1.6,.5,1) both}" +
+    "@keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}" +
+    ".receipt.appt .okc{background:var(--navy)}.rt{font-weight:700;font-size:14px;color:var(--ink2)}.ramt{font-size:30px;font-weight:800;letter-spacing:-.5px;margin:2px 0 8px}.ramt.sm{font-size:20px}.ramt.left{text-align:left;font-size:28px}" +
+    ".tear{height:0;border-top:2px dashed #b6c8d9;margin:4px -4px 8px}" +
+    ".kv{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:13px;text-align:left}.kv .k{color:var(--ink2)}.kv .v{font-weight:700;text-align:right;overflow-wrap:anywhere}" +
+    ".chips{display:flex;flex-wrap:wrap;gap:8px}.chip{font:inherit;font-weight:600;font-size:13.5px;padding:8px 14px;border-radius:999px;border:1.5px solid var(--blue);background:#fff;color:#00589a;cursor:pointer;transition:all .15s;animation:rise .3s both}" +
+    ".chip:nth-child(2){animation-delay:60ms}.chip:nth-child(3){animation-delay:120ms}.chip:nth-child(4){animation-delay:180ms}.chip:nth-child(5){animation-delay:240ms}" +
+    ".chips.follow{margin-top:10px}" +
+    ".wel{display:flex;flex-direction:column;gap:10px;animation:rise .4s cubic-bezier(.2,.8,.2,1) both}" +
+    ".langrow{display:inline-flex;align-items:center;align-self:flex-start;gap:2px;background:var(--pale);border:1px solid var(--line);border-radius:999px;padding:3px 4px 3px 10px;font-size:12.5px}" +
+    ".globe{font-size:13px;margin-right:4px}.sep{color:#9fb6cc}" +
+    ".lang{font:inherit;font-weight:600;font-size:12.5px;color:#00589a;background:transparent;border:0;border-radius:999px;padding:4px 10px;cursor:pointer;transition:background .15s,color .15s}" +
+    ".lang:hover{background:#e3f1fb}.lang.on{background:var(--navy);color:#fff}.lang:disabled{cursor:default;opacity:.6}.lang.on:disabled{opacity:1}" +
+    ".live{display:contents}.lnote{margin:0;max-width:88%;padding:10px 13px;background:#eef6fc;border:1px solid #c0ecff;border-radius:16px;border-top-left-radius:2px;font-size:14.5px;line-height:1.45;color:var(--navy);animation:rise .3s both}" +
+    ".wel.sent .chip{opacity:.55;cursor:default;pointer-events:none}.wel.sent .chip.picked{opacity:1;background:var(--navy);color:#fff;border-color:var(--navy)}" +
+    ".chip:hover{background:var(--blue);color:#fff;transform:translateY(-1px);box-shadow:0 3px 0 var(--gold)}" +
+    ".slots{display:flex;flex-direction:column;gap:8px}.slot{font:inherit;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--pale);color:var(--navy);cursor:pointer;text-align:left;transition:all .15s}" +
+    ".slot:hover{border-color:var(--blue);background:#e3f1fb}.sd{font-weight:700;font-size:14px}.sw3{font-size:13px;color:var(--ink2);font-weight:600}" +
+    "[data-lock].done button{opacity:.55;cursor:default;pointer-events:none;box-shadow:none;transform:none}[data-lock].done button.picked{opacity:1;background:var(--navy);color:#fff;border-color:var(--navy)}" +
+    ".emerg{background:#8a1810;color:#fff;border-radius:16px;padding:14px;border:3px solid #ffc72c;box-shadow:0 8px 22px rgba(138,24,16,.35)}" +
+    ".eh{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px}.et{margin:8px 0 12px;font-size:14px;line-height:1.45}" +
+    ".ecall{display:block;text-align:center;font-weight:800;font-size:17px;background:var(--gold);color:var(--navy);padding:10px;border-radius:10px;text-decoration:none}" +
+    ".stars{display:flex;gap:2px;justify-content:center}.star{background:none;border:0;padding:2px;color:#b6c8d9;cursor:pointer;transition:transform .12s,color .12s}.star:hover,.star:focus-visible{color:#d99a00;transform:scale(1.15)}" +
+    "[data-lock].done .star.picked{color:#d99a00;opacity:1;background:none}" +
+    ".empty{margin:0;font-size:13px;color:var(--ink2)}" +
+    "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.line{stroke-dasharray:none}}";
+
+  /* Bare cards (no outer frame): they draw their own frame */
+  var BARE = { show_insights_carousel: 1, show_payment_receipt_card: 1, show_appointment_confirmation: 1, show_emergency_card: 1, show_quick_actions: 1, show_welcome_chips: 1 };
+
+  function buildCardHTML(tool, args) {
+    var fn = CARDS[tool];
+    if (!fn) { return ""; }
+    var inner;
+    try { inner = fn(args && typeof args === "object" ? args : {}); }
+    catch (e) { inner = empty(); }
+    return "<style>" + CARD_CSS + '</style><div class="card' + (BARE[tool] ? " bare" : "") + '">' + inner + "</div>";
+  }
+
+  /* Send a customer message through the chat. Mirrors what the SDK's own chips do. */
+  function sendUserMessage(text, tool, source) {
+    var ev = new CustomEvent("wgl-send", { detail: { text: text, tool: tool }, bubbles: true, composed: true, cancelable: true });
+    if (!source.dispatchEvent(ev)) { return; }   /* host page handled it (preview page) */
+    var el = chatEl();
+    if (el && typeof el.renderCustomText === "function" && el.presenter && typeof el.presenter.sendQuery === "function") {
+      el.renderCustomText(text, false);
+      el.presenter.sendQuery(text);
+      el.dispatchEvent(new CustomEvent("chat-messenger-user-input-entered", { detail: {}, bubbles: true, composed: true }));
+    } else if (window.console) {
+      console.warn("[wgl] chat-messenger not ready, could not send:", text);
+    }
+  }
+
+  /* One class per element name: customElements.define needs a distinct constructor for each tag.
+     "wgl-card" takes {tool, args} (preview page, console); "cx-<tool-name>" (what the platform sends: a
+     custom_template rich element named after the tool, payload = the card fields) derives the tool from its tag. */
+  var welcomeCards = [];   /* live welcome cards: locked as soon as the visitor sends anything */
+  function lockWelcomeCards() { welcomeCards.forEach(function (c) { c._lockWelcome(); }); }
+
+  function defineCard(tag) {
+    if (!window.customElements || customElements.get(tag)) { return; }
+    var WglCard = function () { return Reflect.construct(HTMLElement, [], WglCard); };
+    WglCard.prototype = Object.create(HTMLElement.prototype, { constructor: { value: WglCard } });
+    Object.setPrototypeOf(WglCard, HTMLElement);
+    Object.defineProperty(WglCard.prototype, "dfPayload", {
+      get: function () { return this._p; },
+      set: function (v) { this._p = v; if (this._root) { this._render(); } }
+    });
+    WglCard.prototype.connectedCallback = function () {
+      if (this._root) { return; }
+      this._root = this.attachShadow({ mode: "open" });
+      this._render();
+      var self = this;
+      this._root.addEventListener("click", function (ev) { self._click(ev); });
+      var track = this._root.querySelector(".track");
+      if (track) {
+        track.addEventListener("scroll", function () { self._dots(track); }, { passive: true });
+        track.addEventListener("keydown", function (e) {
+          if (e.key === "ArrowRight") { self._go(track, 1); e.preventDefault(); }
+          if (e.key === "ArrowLeft") { self._go(track, -1); e.preventDefault(); }
+        });
+      }
+    };
+    WglCard.prototype._render = function () {
+      var p = this._p || {};
+      var tool = p.tool || TAG_TOOL[this.localName];
+      var args = p.tool ? (p.args || p.data || {}) : p;
+      this._tool = tool;
+      this._root.innerHTML = buildCardHTML(tool, args);
+      if (tool === "show_welcome_chips" && welcomeCards.indexOf(this) < 0) { welcomeCards.push(this); }
+    };
+    WglCard.prototype._go = function (track, dir) {
+      var s = track.querySelector(".slide");
+      var w = s ? s.getBoundingClientRect().width + 10 : 280;
+      var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+      track.scrollBy({ left: dir * w, behavior: reduce ? "auto" : "smooth" });
+    };
+    WglCard.prototype._dots = function (track) {
+      var s = track.querySelector(".slide");
+      var w = s ? s.getBoundingClientRect().width + 10 : 280;
+      var idx = Math.round(track.scrollLeft / w);
+      var dots = this._root.querySelectorAll(".dots i");
+      for (var i = 0; i < dots.length; i++) { dots[i].className = i === idx ? "on" : ""; }
+    };
+    WglCard.prototype._click = function (ev) {
+      var t = ev.target;
+      while (t && t !== this._root && !(t.getAttribute && (t.hasAttribute("data-send") || t.hasAttribute("data-nav") || t.hasAttribute("data-lang")))) { t = t.parentNode; }
+      if (!t || t === this._root) { return; }
+      if (t.hasAttribute("data-lang")) { this._lang(t.getAttribute("data-lang")); return; }
+      if (t.hasAttribute("data-nav")) { this._go(this._root.querySelector(".track"), Number(t.getAttribute("data-nav"))); return; }
+      var group = t.closest ? t.closest("[data-lock]") : null;
+      if (group) {
+        if (group.classList.contains("done")) { return; }
+        group.classList.add("done");
+        t.classList.add("picked");
+      }
+      if (this._tool === "show_welcome_chips") {
+        /* the first agent turn: the chip text goes out with page_context and the chosen ui_language as widget variables */
+        var chosen = this._p.lang === "es" ? "es" : "en";
+        var pg = this._p.page || "home";
+        this._p.picked = t.getAttribute("data-send");
+        this._lockWelcome();
+        setVars({ page_context: window.wglPageContext || pg, ui_language: chosen });
+      }
+      sendUserMessage(t.getAttribute("data-send"), this._tool, this);
+    };
+    WglCard.prototype._lang = function (code) {
+      var p = this._p;
+      if (!p || this._tool !== "show_welcome_chips" || p.sent || (code !== "en" && code !== "es")) { return; }
+      p.lang = code;
+      writeLang(code, p.page || pageKey());
+      setVars({ ui_language: code });
+      this._render();
+      var b = this._root.querySelector('[data-lang="' + code + '"]');
+      if (b) { b.focus(); }
+    };
+    WglCard.prototype._lockWelcome = function () {
+      if (this._tool !== "show_welcome_chips" || !this._p || this._p.sent) { return; }
+      this._p.sent = true;
+      this._render();
+    };
+    customElements.define(tag, WglCard);
+  }
+  var TAG_TOOL = {};
+  WGL_TOOLS.forEach(function (name) { TAG_TOOL["cx-" + name.replace(/_/g, "-")] = name; });
+  defineCard("wgl-card");
+  WGL_TOOLS.forEach(function (name) { defineCard("cx-" + name.replace(/_/g, "-")); });
+
+  /* ---- SDK wiring: client-side function per card tool + response fallback ---- */
+  var recent = {};
+  function renderTool(name, args) {
+    var el = chatEl();
+    if (!el || typeof el.renderCustomCard !== "function" || !CARDS[name]) { return false; }
+    var key = name + "|" + JSON.stringify(args || {});
+    var now = Date.now();
+    if (recent[key] && now - recent[key] < 10000) { return true; }
+    recent[key] = now;
+    el.renderCustomCard([{ type: "custom_template", name: "wgl-card", id: "wgl-" + now, payload: { tool: name, args: args || {} } }]);
+    return true;
+  }
+  var registered = false;
+  function registerTools() {
+    if (registered || PREVIEW) { return registered; }
+    var el = chatEl();
+    if (!el || !el.presenter || typeof el.presenter.registerClientSideFunctionForAllTools !== "function") { return false; }
+    WGL_TOOLS.forEach(function (name) {
+      el.presenter.registerClientSideFunctionForAllTools(name, function (args) {
+        renderTool(name, args);
+        return { rendered: true };
+      });
+    });
+    registered = true;
+    return true;
+  }
+  function lastSegment(p) { var s = String(p || "").split("/"); return s[s.length - 1]; }
+  function onResponse(e) {
+    var raw = e && e.detail && e.detail.raw;
+    var outs = (raw && raw.outputs) || [];
+    outs.forEach(function (o) {
+      var calls = (o && o.toolCalls && o.toolCalls.toolCalls) || [];
+      calls.forEach(function (c) {
+        var name = lastSegment(c && c.tool);
+        if (CARDS[name]) { renderTool(name, c.args); }
+      });
+    });
+  }
+
+  /* ---- welcome rendered by the website when the chat opens (once per browser session) ---- */
+  var WELCOME_KEY = "wgl-welcome-shown";
+  var welcomeDone = false;
+  var resetAt = 0;
+  function reducedMotion() { return !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }
+  function welcomeShown() {
+    try { return window.sessionStorage.getItem(WELCOME_KEY) === "1"; } catch (e) { return welcomeDone; }
+  }
+  function setWelcomeShown(on) {
+    welcomeDone = on;
+    try { if (on) { window.sessionStorage.setItem(WELCOME_KEY, "1"); } else { window.sessionStorage.removeItem(WELCOME_KEY); } } catch (e) { /* storage blocked */ }
+  }
+  function isChatOpen() {
+    var l = findLauncher();
+    return !!(l && l.bubble && (l.bubble.expanded === true || isAlreadyOpen(l)));
+  }
+  function showWelcome(attempt) {
+    if (PREVIEW || welcomeDone || welcomeShown()) { return; }
+    attempt = attempt || 0;
+    var el = chatEl();
+    if (!el || typeof el.renderCustomText !== "function" || typeof el.renderCustomCard !== "function" || !el.presenter) {
+      if (attempt < 20) { setTimeout(function () { showWelcome(attempt + 1); }, 250); }
+      return;
+    }
+    setWelcomeShown(true);
+    var page = pageKey(), lang = readLang(page);
+    setVars({ page_context: window.wglPageContext || page, ui_language: lang });
+    el.renderCustomText(WELCOME.pages[page][lang].greeting, true);
+    setTimeout(function () {
+      el.renderCustomCard([{ type: "custom_template", name: "cx-show-welcome-chips", id: "wgl-welcome-" + Date.now(), payload: { page: page, lang: lang, initial: lang } }]);
+    }, reducedMotion() ? 0 : 380);
+  }
+  function onOpenChanged(e) {
+    if (e && e.detail && e.detail.isOpen) { showWelcome(0); }
+  }
+  function onSessionReset() {
+    /* "Start new chat": the transcript is cleared, so greet again; the init-time session start must not trigger this */
+    if (!resetAt || Date.now() - resetAt > 8000) { return; }
+    resetAt = 0;
+    setWelcomeShown(false);
+    setTimeout(function () { showWelcome(0); }, 400);
+  }
+  function watchResetButton() {
+    var b = doc.querySelector("chat-reset-session-button");
+    if (b && !b._wglWatched) {
+      b._wglWatched = true;
+      b.addEventListener("click", function () { resetAt = Date.now(); }, true);
+    }
+  }
+
+  function wireSdk() {
+    watchResetButton();
+    if (!welcomeDone && !welcomeShown() && isChatOpen()) { showWelcome(0); }
+    applyVariables();
+    registerTools();
+  }
+
+  /* ---------------------------------------------------------------- init */
   function init() {
     fab = doc.querySelector(".assistant-fab");
     toast = doc.querySelector(".assistant-toast");
     doc.querySelectorAll("[data-open-assistant]").forEach(function (el) {
-      el.addEventListener("click", function (ev) {
-        ev.preventDefault();
-        openAssistant(0);
-      });
+      el.addEventListener("click", function (ev) { ev.preventDefault(); openAssistant(0); });
     });
+    if (PREVIEW) { return; }
     syncPlaceholder();
     if (window.customElements && customElements.whenDefined) {
-      customElements.whenDefined("chat-messenger").then(syncPlaceholder);
+      customElements.whenDefined("chat-messenger").then(function () { syncPlaceholder(); wireSdk(); });
     }
-    window.addEventListener("chat-messenger-loaded", syncPlaceholder);
-    /* the bubble may be added a little later: watch briefly */
+    ["chat-messenger-loaded", "chat-messenger-context-registered", "chat-messenger-session-id-set",
+     "chat-messenger-start-new-session", "chat-messenger-open-changed"].forEach(function (n) {
+      window.addEventListener(n, function () { syncPlaceholder(); wireSdk(); });
+    });
+    window.addEventListener("chat-messenger-response-received", onResponse);
+    window.addEventListener("chat-messenger-open-changed", onOpenChanged);
+    window.addEventListener("chat-messenger-start-new-session", onSessionReset);
+    window.addEventListener("chat-messenger-session-ended", function () { setWelcomeShown(false); });
+    window.addEventListener("chat-messenger-session-expired", function () { setWelcomeShown(false); });
+    window.addEventListener("chat-messenger-user-input-entered", lockWelcomeCards);
     var n = 0;
-    var t = setInterval(function () { syncPlaceholder(); if (++n > 40 || root.classList.contains("has-assistant-widget")) { clearInterval(t); } }, 500);
+    var t = setInterval(function () {
+      syncPlaceholder(); wireSdk();
+      if (++n > 40 || (registered && root.classList.contains("has-assistant-widget"))) { clearInterval(t); }
+    }, 500);
   }
 
   if (doc.readyState === "loading") { doc.addEventListener("DOMContentLoaded", init); } else { init(); }
   window.openAssistant = function () { openAssistant(0); };
+
+  /* Used by widget-preview.html and handy in the console: WGLCards.create("show_bill_trend_card", {...}) */
+  window.WGLCards = {
+    tools: WGL_TOOLS,
+    welcome: WELCOME,
+    pageKey: pageKey,
+    create: function (tool, args) {
+      var el = doc.createElement("wgl-card");
+      el.dfPayload = { tool: tool, args: args };
+      return el;
+    }
+  };
 })();

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Widget preview (review only) | Washington Gas demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --navy:#002a5c; --blue:#0072bc; --gold:#ffc72c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Figtree",system-ui,sans-serif; background:#dfe9f2; color:var(--navy); min-height:100vh; display:flex; justify-content:center; padding:24px 12px; }
+  .note { max-width:420px; margin:0 auto 12px; font-size:12px; color:#495057; text-align:center; }
+  .win { width:100%; max-width:420px; background:#fff; border-radius:20px; overflow:hidden; box-shadow:0 24px 64px rgba(0,42,92,.34),0 4px 14px rgba(0,42,92,.18); display:flex; flex-direction:column; }
+  .bar { background:linear-gradient(135deg,#001a3d 0%,#002a5c 52%,#0a5aa3 100%); color:#fff; padding:14px 16px 12px; border-bottom:4px solid var(--gold); display:flex; gap:12px; align-items:center; }
+  .bar svg { width:42px; height:42px; flex:none; }
+  .bar h1 { margin:0; font-size:17px; font-weight:700; }
+  .bar p { margin:2px 0 0; font-size:12.5px; color:#b8f0c8; }
+  .msgs { padding:14px; display:flex; flex-direction:column; gap:12px; background:#fff; }
+  .m { max-width:88%; padding:10px 13px; border-radius:16px; font-size:14.5px; line-height:1.45; }
+  .m.bot { background:#eef6fc; border:1px solid #c0ecff; border-top-left-radius:2px; align-self:flex-start; }
+  .m.user { background:linear-gradient(135deg,#0072bc,#005a9c); color:#fff; border-top-right-radius:2px; align-self:flex-end; }
+  .typing { align-self:flex-start; display:flex; gap:5px; padding:12px 14px; background:#eef6fc; border:1px solid #c0ecff; border-radius:16px; border-top-left-radius:2px; }
+  .typing i { width:7px; height:7px; border-radius:50%; background:#0072bc; animation:b 1.2s infinite; }
+  .typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+  @keyframes b { 0%,60%,100%{transform:none;opacity:.5} 30%{transform:translateY(-4px);opacity:1} }
+  .tag { font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#495057; margin:6px 2px -4px; }
+  .vars { align-self:flex-end; max-width:96%; font:600 11px/1.4 ui-monospace,Consolas,monospace; color:#495057; background:#f3fafe; border:1px dashed #9fb6cc; border-radius:8px; padding:4px 8px; overflow-wrap:anywhere; }
+  .foot { padding:10px 14px 14px; border-top:1px solid #e1ebf3; }
+  .inp { border:1.5px solid #ced4da; border-radius:12px; background:#f3fafe; padding:10px 12px; color:#6c757d; font-size:14px; display:flex; justify-content:space-between; align-items:center; }
+  .inp b { background:var(--gold); color:var(--navy); border-radius:8px; padding:4px 10px; }
+  @media (max-width:600px) { body { padding:0; } .win { border-radius:0; max-width:none; min-height:100vh; } .note { display:none; } }
+  @media (prefers-reduced-motion: reduce) { .typing i { animation:none; } }
+</style>
+</head>
+<body>
+<main style="width:100%;max-width:420px">
+  <p class="note">Review-only page: the site-rendered welcome states first, then every chat card with sample data (no agent, no SDK). Not linked from the site. Taps on card buttons show the message they would send and the widget variables that go with it.</p>
+  <div class="win">
+    <div class="bar">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#fff"/><path fill="#0072bc" d="M16.5 4c.4 4.2-2.2 6.6-4.4 9.2C10 15.7 8.8 18 8.8 20.6a7.2 7.2 0 0 0 14.4 0c0-3.2-1.800-5.700-3.400-7.300-.2 1.800-1 3-2.200 3.700.6-4.600-.4-9-1.100-13z"/><path fill="#5fc6ff" d="M16 27a3.800 3.800 0 0 1-3.800-3.800c0-2.100 1.800-3.600 3.800-6 2 2.400 3.800 3.900 3.800 6A3.800 3.800 0 0 1 16 27z"/></svg>
+      <div><h1>Washington Gas Assistant</h1><p>&#9679; Online &middot; replies in seconds</p></div>
+    </div>
+    <div class="msgs" id="msgs" aria-live="polite"></div>
+    <div class="foot"><div class="inp"><span>Ask about your bill, usage or rebates</span><b>Send</b></div></div>
+  </div>
+</main>
+<script>window.WGL_PREVIEW = true;</script>
+<script src="assets/js/assistant.js"></script>
+<script>
+(function () {
+  var box = document.getElementById("msgs");
+  function bubble(text, who) { var d = document.createElement("div"); d.className = "m " + who; d.textContent = text; box.appendChild(d); return d; }
+  function tag(t) { var d = document.createElement("div"); d.className = "tag"; d.textContent = t; box.appendChild(d); }
+  function card(tool, args) { tag(tool); box.appendChild(WGLCards.create(tool, args)); }
+
+  function typing() { var t = document.createElement("div"); t.className = "typing"; t.setAttribute("aria-label", "Assistant is typing"); t.innerHTML = "<i></i><i></i><i></i>"; box.appendChild(t); return t; }
+  var W = WGLCards.welcome;
+  function welcome(page, lang, label, extra) {
+    tag(label);
+    bubble(W.pages[page][lang].greeting, "bot");
+    var args = { page: page, lang: lang, initial: extra && extra.initial || lang };
+    if (extra) { for (var k in extra) { args[k] = extra[k]; } }
+    box.appendChild(WGLCards.create("show_welcome_chips", args));
+  }
+  /* Review states of the site-rendered welcome (the first card is live: tap a chip or the language toggle) */
+  welcome("home", "en", "welcome: chat opens on the home page (rendered by the website, no agent call yet)");
+  welcome("billing", "en", "welcome: billing page");
+  welcome("safety", "en", "welcome: safety page (real guidance in the greeting)");
+  welcome("spanish", "es", "welcome: Spanish page (defaults to Spanish)");
+  welcome("billing", "es", "welcome: after tapping Español on the billing page (the greeting is repeated in Spanish inside the card)", { initial: "en" });
+  tag("welcome: after a chip tap (chips locked, first agent turn sent with variables)");
+  bubble(W.pages.billing.en.greeting, "bot");
+  box.appendChild(WGLCards.create("show_welcome_chips", { page: "billing", lang: "en", initial: "en", sent: true, picked: "Why is my bill high?" }));
+  bubble("Why is my bill high?", "user");
+  var vv = document.createElement("div"); vv.className = "vars"; vv.textContent = "chat-messenger-variables = {\"page_context\":\"billing\",\"ui_language\":\"en\"}"; box.appendChild(vv);
+  typing();
+  tag("agent reply cards follow");
+
+  bubble("Hi Maria, welcome back. I can see your bill is higher than last month. Want me to look into it?", "bot");
+  card("show_quick_actions", { prompt: "What would you like to do?", options: ["Why is my bill high?", "Pay my bill", "Find rebates"] });
+  bubble("Why is my bill high?", "user");
+
+  card("show_bill_trend_card", { highlight_note: "$46.30 more than last month", months: [
+    { period: "Oct 2025", amount: 52.4 }, { period: "Nov 2025", amount: 78.9 }, { period: "Dec 2025", amount: 118.2 }, { period: "Jan 2026", amount: 164.75 },
+    { period: "Feb 2026", amount: 171.3 }, { period: "Mar 2026", amount: 129.6 }, { period: "Apr 2026", amount: 88.1 }, { period: "May 2026", amount: 61.5 },
+    { period: "Jun 2026", amount: 44.2 }, { period: "Jul 2026", amount: 39.8 }, { period: "Aug 2026", amount: 41.05 }, { period: "Sep 2026", amount: 87.35, is_current: true } ] });
+
+  card("show_usage_history_card", { unit: "therms", months: [
+    { period: "Oct 2025", usage: 22 }, { period: "Nov 2025", usage: 48 }, { period: "Dec 2025", usage: 91 }, { period: "Jan 2026", usage: 128 },
+    { period: "Feb 2026", usage: 133 }, { period: "Mar 2026", usage: 97 }, { period: "Apr 2026", usage: 58 }, { period: "May 2026", usage: 31 },
+    { period: "Jun 2026", usage: 16 }, { period: "Jul 2026", usage: 12 }, { period: "Aug 2026", usage: 13 }, { period: "Sep 2026", usage: 40 } ] });
+
+  card("show_weather_usage_card", { unit: "therms", months: [
+    { period: "Oct", usage: 22, hdd: 180 }, { period: "Nov", usage: 48, hdd: 420 }, { period: "Dec", usage: 91, hdd: 730 }, { period: "Jan", usage: 128, hdd: 905 },
+    { period: "Feb", usage: 133, hdd: 940 }, { period: "Mar", usage: 97, hdd: 700 }, { period: "Apr", usage: 58, hdd: 390 }, { period: "May", usage: 31, hdd: 160 } ] });
+
+  card("show_bill_breakdown_card", { total: 87.35, items: [
+    { label: "Gas supply", amount: 38.2 }, { label: "Delivery", amount: 31.4 }, { label: "Customer charge", amount: 11.5 }, { label: "Taxes and fees", amount: 6.25 } ] });
+
+  card("show_insights_carousel", { insights: [
+    { id: "i1", title: "Usage is 38% above last year", summary: "Colder weather explains about two thirds of it. The rest looks like higher heating use in the evening.", severity: "attention", action_label: "Explain my bill", action_message: "Explain why my usage is higher than last year" },
+    { id: "i2", title: "Budget Plan could even out winter bills", summary: "Spread the year into 12 similar payments instead of winter spikes.", severity: "saving", action_label: "Tell me about Budget Plan", action_message: "Tell me about the Budget Plan" },
+    { id: "i3", title: "Payment is due in 3 days", summary: "Pay now to avoid a late fee.", severity: "urgent", action_label: "Pay now", action_message: "I want to pay my bill now" },
+    { id: "i4", title: "Your meter was read on Sep 28", summary: "This bill is based on an actual read.", severity: "info", action_label: "", action_message: "" } ] });
+
+  card("show_rebate_card", { rebates: [
+    { id: "r1", name: "High-efficiency furnace", amount: "Up to $800", deadline: "Dec 1, 2026", status_note: "Your 2009 furnace may qualify", action_label: "Start my claim", action_message: "Help me claim the furnace rebate" },
+    { id: "r2", name: "Smart thermostat", amount: "$75", deadline: "Dec 31, 2026", status_note: "No smart thermostat on file", action_label: "See requirements", action_message: "What do I need for the smart thermostat rebate?" } ] });
+
+  card("show_claim_status_card", { claim_id: "RB-20418", steps: [
+    { label: "Application received", state: "done" }, { label: "Documents verified", state: "done" }, { label: "Under review", state: "current" }, { label: "Rebate paid", state: "todo" } ],
+    note: "Reviews usually take up to 10 business days." });
+
+  card("show_payment_receipt_card", { amount: 87.35, date: "Oct 18, 2026", confirmation: "WG-5530918", method_last4: "4242" });
+  card("show_bill_summary_card", { title: "September bill", amount: 87.35, convenience_fee: 0, due_date: "Oct 21, 2026", confirmation_number: "WG-5530918", card_last4: "4242" });
+  card("show_slot_picker", { service_type: "start", slots: [
+    { slot: "S1", date: "Tue, Nov 3", window: "8 am to 12 pm" }, { slot: "S2", date: "Tue, Nov 3", window: "12 pm to 4 pm" }, { slot: "S3", date: "Wed, Nov 4", window: "8 am to 12 pm" } ] });
+  card("show_appointment_confirmation", { service_type: "Start service", date: "Tue, Nov 3", window: "8 am to 12 pm", address: "1204 Oak Street, Silver Spring MD", confirmation_numbers: ["AP-100234"] });
+  card("show_csat_card", { prompt: "How did we do today?" });
+  card("show_emergency_card", { safety_text: "If you smell gas, leave the building now. Do not use switches, phones or flames inside. Call from outside.", emergency_number: "800-752-7520" });
+
+  var t = document.createElement("div"); t.className = "typing"; t.setAttribute("aria-label", "Assistant is typing");
+  t.innerHTML = "<i></i><i></i><i></i>"; tag("typing indicator (reference)"); box.appendChild(t);
+
+  window.addEventListener("wgl-send", function (e) {
+    e.preventDefault();
+    bubble(e.detail.text, "user");
+    var v = document.createElement("div"); v.className = "vars";
+    try { v.textContent = "chat-messenger-variables = " + (sessionStorage.getItem("chat-messenger-variables") || "{}"); } catch (x) { v.textContent = "variables unavailable"; }
+    box.appendChild(v);
+    typing();
+    bubble("(preview) this message would now go to the agent", "bot");
+    box.lastChild.scrollIntoView({ block: "nearest" });
+  }, true);
+})();
+</script>
+</body>
+</html>

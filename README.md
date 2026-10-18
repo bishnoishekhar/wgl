@@ -1,6 +1,6 @@
 # Washington Gas mock site (demonstration)
 
-A static, framework-free mock of the Washington Gas website (home, pay my bill, start or stop service, safety and outages, get assistance, ways to save, contact). It exists only to host a **chat and voice assistant** (Google CX Agent Studio web widget) in a realistic customer-facing context for a prototype demo.
+A static, framework-free mock of the Washington Gas website (home, pay my bill, start or stop service, safety and outages, get assistance, ways to save, rebates and savings, home energy assessment, business owners, customer choice, damage claims, Spanish information, contact). It exists only to host a **chat and voice assistant** (Google CX Agent Studio web widget) in a realistic customer-facing context for a prototype demo.
 
 > Demonstration site for a customer experience prototype. Not the official Washington Gas website.
 
@@ -16,20 +16,39 @@ pay-my-bill.html            Payment options, card convenience fee, walk-in offic
 start-stop-service.html     Notice, start/stop fees, Customer Choice, new service, demo request form
 safety-and-outages.html     Signs of a leak, what to do, carbon monoxide, 811, outage information
 get-assistance.html         Washington Gas Cares, programme status table (with valid-through dates), budget plan, payment plans
-ways-to-save.html           Rebates (MD / VA / D.C.), Rinnai offer, home energy assessment, contractors
+ways-to-save.html           Overview: rebates (MD / VA / D.C.), Rinnai offer, home energy assessment, contractors
+rebates-and-savings.html    Detailed rebates: up to $800, Maryland (ends Dec 31, 2026, submit by Dec 1) and Virginia tables,
+                            D.C. via DCSEU, Rinnai offer dates, contractors, Track My Rebate, financing, builders
+home-energy-assessment.html What the online assessment is, how to start it (external Opower page), D.C. pending approval
+business-owners.html        New gas service steps, added load or split meter, demolition and abandonment forms,
+                            business energy solutions incentives, Maryland new construction table, commercial card fee
+customer-choice.html        Eligibility (DC, MD, VA), what Washington Gas still does, billing options, questions to ask suppliers
+damage-claims.html          How to file the online Damage Claim Form (on the official page), timelines, FAQs, what is not stated
+espanol.html                Spanish landing page (emergency, pay a bill, start or stop service, assistance, safety, contact)
 contact.html                Phone numbers, hours, mailing addresses, FAQs
 404.html                    Not-found page (sets a <base> so links work from the GitHub Pages sub-path)
+sitemap.xml                 Simple sitemap of the public pages (absolute URLs under https://bishnoishekhar.github.io/wgl/)
 .nojekyll                   Tells GitHub Pages to serve files as-is
 assets/css/site.css         All site styling (palette, header, mega menu, cards, forms, footer, placeholder launcher)
 assets/css/widget-theme.css Restyles the CX Agent Studio widget (loaded AFTER the SDK stylesheets)
 assets/js/site.js           Sticky header shrink, mega menu, mobile menu, hero search routing, demo forms
-assets/js/assistant.js      Wires every [data-open-assistant] button to the widget; manages the placeholder launcher
+assets/js/assistant.js      Wires every [data-open-assistant] button to the widget; manages the placeholder launcher;
+                            exposes window.wglPageContext (from <body data-page-context>)
 assets/js/widget-embed.html SINGLE SOURCE for the widget snippet (head part + body part), documented
-scripts/build_pages.py      Stamps the snippet from widget-embed.html into every page
+scripts/chrome.html         SINGLE SOURCE for the utility-bar links, main navigation (mega menu) and footer columns
+scripts/build_pages.py      Stamps the widget snippet and the shared chrome into every page (python scripts/build_pages.py [--check])
 README.md                   This file
 ```
 
 All links and asset paths are relative (no leading `/`), so the site works at `https://bishnoishekhar.github.io/wgl/` and from any folder.
+
+## Shared navigation and footer
+
+The utility-bar links, the main navigation (mega menu) and the footer columns are no longer edited page by page. They live in `scripts/chrome.html` between `@@UTIL`, `@@NAV` and `@@FOOT` marker comments, and `scripts/build_pages.py` stamps them into every page (together with the widget snippet). To add a link: edit `scripts/chrome.html`, run `python scripts/build_pages.py`, and `python scripts/build_pages.py --check` should then print no `DIFFERS` lines. The script also adds `aria-current="page"` to the menu button of the section each page belongs to, using `<body data-page-context="...">`. A new page needs the five marker pairs (copy them from any page), a `data-page-context` value that exists in `MENU_FOR_CONTEXT` in the script, and an entry in `sitemap.xml`.
+
+### Page context for the assistant
+
+Every page has `<body data-page-context="...">`: `home`, `billing`, `service`, `safety`, `assistance`, `savings` (ways-to-save and rebates-and-savings), `business`, `choice`, `claims`, `energy`, `spanish`, `contact` (and `notfound` on 404.html). `assets/js/assistant.js` copies it to `window.wglPageContext`. It is also sent to the agent as the session variable `page_context` (see `docs/widget-contract.md`).
 
 ## The assistant widget
 
@@ -96,6 +115,12 @@ Only variables the SDK actually reads are used (checked against `chat-messenger-
 
 The SDK leaves launcher placement to the host page, which is why the launcher has its own fixed-position rule; the chat window is positioned by the SDK via `align-bottom-right`.
 
+### Chat cards, page context and the preview page
+
+* `assets/js/assistant.js` writes `{page_context}` into sessionStorage `chat-messenger-variables` before the widget opens (and again on session events) and defines the `<wgl-card>` custom element. Card tools (usage history, bill trend, weather vs usage, bill breakdown, insights carousel, rebates, claim status, receipt, bill summary, quick actions, slot picker, appointment confirmation, emergency, CSAT) are rendered inside the chat through the SDK's `custom_template` rich element. The agent-side payloads, the SDK findings and what is unverified live are in `docs/widget-contract.md`.
+* `createContext` now has `enableWelcomeEvent: true`, so the agent greets first (the agent must handle the `welcome` event).
+* `widget-preview.html` (not linked, not stamped by `build_pages.py`) renders every card with sample data and no SDK: open it via `python -m http.server 8000`, then http://localhost:8000/widget-preview.html. Card buttons show the message they would send.
+
 ### Token broker and allowed origins
 
 The widget runs with the token broker enabled (`enableTokenBroker: true`). The page's **origin** must be allowed in the channel settings (Agent Studio, Deploy, the web widget channel):
@@ -145,4 +170,6 @@ Facts (numbers, fees, hours, programme dates) come only from the Washington Gas 
 
 ## Design notes
 
-Palette from the real site's stylesheet: navy `#002a5c`, brand blue `#0072bc`, primary blue `#245ea4`, light blue `#5fc6ff`, aqua `#c0ecff`, pale `#f3fafe`, gold `#ffc72c`, green `#4eaf6b`, red `#e62419`, and the grey scale `#f8f9fa` to `#212529`. Typeface: Figtree. Header shrinks on scroll; the main menu is a mega menu on desktop and a hamburger accordion on mobile. The pages share the same header, footer and snippet but are plain HTML files: to change the header or footer, edit it in each page.
+Palette from the real site's stylesheet: navy `#002a5c`, brand blue `#0072bc`, primary blue `#245ea4`, light blue `#5fc6ff`, aqua `#c0ecff`, pale `#f3fafe`, gold `#ffc72c`, green `#4eaf6b`, red `#e62419`, and the grey scale `#f8f9fa` to `#212529`. Typeface: Figtree. Header shrinks on scroll; the main menu is a mega menu on desktop and a hamburger accordion on mobile. The pages share the same header, footer and snippet and are plain HTML files; the header menu and footer are stamped from `scripts/chrome.html` (see above).
+
+The six later pages (rebates and savings, home energy assessment, business owners, customer choice, damage claims, Spanish) use content read on the live washingtongas.com pages and wgsmartsavings.com on October 17, 2026, plus the knowledge base. Spanish wording on `espanol.html` follows the real site's /espanol pages where they cover the fact; elsewhere it is a plain-Spanish translation of the same facts, numbers unchanged. Where pages of the real site disagree (card fee, notice period, D.C. RES discount months, 1.5 MBTU contact route, Spanish versus English card fee), the page says so.

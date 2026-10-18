@@ -1,0 +1,168 @@
+# Widget contract: agent widget tools <-> mock-site chat cards
+
+Audience: the agent-side author (tool JSON under `cxas_app/WGL_Agent/tools/`) and the front-end author (`assets/js/assistant.js`).
+Both sides must follow this file. Anything marked **UNVERIFIED LIVE** could only be checked by reading the SDK source, not by running the real widget (it needs an allowed origin).
+
+## 0. Verified live (Rev 17): how a CUSTOM widget tool reaches the page
+
+Checked against the live WGL app with `Sessions.run` (raw `RunSessionResponse`, `outputs[]` and `diagnostic_info.messages[]`).
+
+1. **Tool call args.** A widget tool (`widgetType: CUSTOM`) must be called with `args.payload` (the platform says "LLM failed to provide parameter `payload`" otherwise), plus `summary` and, when `textResponseConfig` is LLM_GENERATED, `textResponse`. Everything the tool schema declares lives inside `args.payload`. Flat args (`{prompt, options}`) fail and the model has to retry.
+2. **Tool response (to the model).** `{"payload": <what was passed>, "summary": "...", "textResponse": "...", "widget_tool_status": "success"}`. The `textResponse` is also emitted to the customer as a text output, so a card tool must not carry a text that repeats the greeting or the answer.
+3. **What the client receives.** One extra output in the turn with `payload` = `{"type": "custom_template", **args.payload}`: the declared fields are spread next to `type`. Nothing else names the tool: there is no tool call in `outputs[]`, and the element name is NOT derived from the tool name or `uiConfig`.
+4. **What the SDK does with it.** `chat-messenger.js` v1.16 maps a `custom_template` rich element with `createElement(element.name)` and `dfPayload = element.payload` (SDK source, `case "custom_template"`). So the platform payload only renders if the tool's own `payload` argument contains `name` (a defined custom element) and `payload` (the card data).
+5. **Resulting contract (what the tool JSONs now declare).** Every card tool has exactly two parameters: `name` (STRING, enum with one value `cx-<tool-name-with-dashes>`, e.g. `cx-show-bill-trend-card`) and `payload` (OBJECT, the card fields documented below). Call: `{"payload": {"name": "cx-show-bill-trend-card", "payload": {...card fields...}}, "summary": "..."}`. The client then gets `{"type": "custom_template", "name": "cx-show-bill-trend-card", "payload": {...card fields...}}`, which the SDK renders natively with no page adapter.
+6. **Page side.** `assistant.js` defines one custom element per card tool, `cx-<tool-name-with-dashes>` (same renderer; the tool comes from the tag name; `dfPayload` is the card fields). `wgl-card` with `dfPayload = {tool, args}` stays for the preview page and `WGLCards.create`. The older toolCalls / registerClientSideFunction path stays as a harmless fallback; CES does not use it for CUSTOM tools.
+7. **Callbacks.** The before_model callbacks build widget calls with `_widget_call(tool, card, summary)` (opening chips, emergency card). Quick actions and the emergency card use `textResponseConfig.type = NONE`, so a callback call needs no text.
+
+## 0b. Rev 18: the website renders the welcome (no welcome event)
+
+* `enableWelcomeEvent` is **false**. When the chat opens (`chat-messenger-open-changed` with `isOpen`, or a widget already open on load, polled), `assistant.js` renders the page greeting with `renderCustomText(text, true)` and then a chips card, the custom element `cx-show-welcome-chips` (payload `{page, lang, initial}`), through `renderCustomCard([{type: "custom_template", name: "cx-show-welcome-chips", payload}])`. No agent call is made.
+* Texts: ONE data structure `WELCOME` in `assistant.js` (13 pages, `en` and `es`, greeting and chips; the `notfound` page exists on the site only). `evals/offline_tests/test_site_welcome.py` keeps it equal to the `greeting_page_*` seed strings and the `_PAGE_CHIPS` lists in the before_model callback.
+* Once per browser session: sessionStorage `wgl-welcome-shown`. It is cleared on session end or expiry and after "Start new chat" (the reset button click opens an 8 s window in which `chat-messenger-start-new-session` triggers a fresh welcome).
+* Language: sessionStorage `wgl-ui-language` `{l, p}`; the Spanish page defaults to `es`, every other page to `en`. The toggle re-renders the card and, because the greeting bubble belongs to the SDK, repeats the new-language greeting inside the card.
+* **Variables** (sessionStorage `chat-messenger-variables`, merged): `{page_context: <page>, ui_language: "en" | "es"}`, written at welcome time, on every toggle and again on a chip tap, before the chip text goes out through `presenter.sendQuery` (same route as the card buttons). The first agent turn is therefore the chip text or the typed message.
+* The card locks (chips and toggle disabled, chosen chip highlighted) on a chip tap or on any `chat-messenger-user-input-entered`.
+* Accessibility: toggle is a `role=group` of `aria-pressed` buttons, the translated greeting sits in an `aria-live=polite` region, chips are native buttons with the gold focus ring, animations stop under `prefers-reduced-motion`.
+* `show_bill_trend_card` accepts optional `action_label` and `action_message`: rendered as one chip under the chart (used for "See weather vs usage", so only one card is delivered per reply).
+
+Sections 1 to 3 below were written before this check; where they say `wgl-card` receives `{tool, args}` from the platform, read section 0 instead. Card field shapes in section 3 are unchanged: they are the contents of the inner `payload`.
+
+---
+
+## 1. SDK research (chat-messenger.js v1.16, build `chat-messenger_chat-messenger_20260429_01_RC00`)
+
+Sources read: the SDK bundle itself (`https://www.gstatic.com/chat-messenger/sdk/prod/v1.16/chat-messenger.js`, 1.3 MB, minified but with stable public names), `themes/chat-messenger-default.css`, and the Google docs pages "web widget" and "Rich response widgets" (the docs are thin: they name `renderCustomText`, `renderCustomCard`, the three events below and `enableWelcomeEvent`, and nothing about CUSTOM widgets).
+
+### 1a. How custom widget responses reach the page and how the page renders its own HTML
+
+What the SDK actually contains (verified in the bundle):
+
+* The SDK has **no code that knows the strings `widgetType`, `CUSTOM`, `ORDER_SUMMARY` or `QUICK_ACTIONS`**. Widget typing is a server/console concept. The client only sees these shapes in a CES response (`outputs[]`):
+  * `text`
+  * `payload` (a Struct): if it has `richContent` it is rendered as Dialogflow-Messenger rich content; otherwise it is treated as an array of rich elements `{type: ...}`.
+  * `toolCalls.toolCalls[]` with `{id, tool, args}`: these are **client-side function calls**. The SDK takes the last path segment of `tool` as the tool name and runs a registered JavaScript function; the function's return value is sent back to the agent as the tool result (`outputParameters`). If nothing is registered the SDK logs "Call to unknown ..." and sends an error result back to the agent.
+* Rich element type **`custom_template`** is the official hook for custom HTML: `{type: "custom_template", name: "<custom-element-tag>", payload: {...}}`. The SDK does `document.createElement(name)`, sets `element.dfPayload = payload` and `element.dfResponseId`, and mounts it **inside the message list** (inside a `df-custom-template` element, inside the SDK's shadow DOM). The element must already be defined with `customElements.define`. If it is not defined the SDK logs "Unknown custom element" and shows nothing.
+* Public methods on `<chat-messenger>`: `renderCustomText(text, isBot = true)` and `renderCustomCard(richElementsArray)` (runs the array through the same rich-element mapper, so a `custom_template` element works). Also `setVariables(obj)`, `registerClientSideFunction(tool, action, fn)`, and `presenter.registerClientSideFunctionForAllTools(actionName, fn)` (the SDK itself uses this for the built-in action name `df_render_custom_card`, whose `payloads` argument is passed to `renderCustomCard`).
+
+Design chosen (what `assistant.js` does):
+
+1. Defines the custom element **`wgl-card`** (shadow DOM, own CSS, no external libs) at script load, before the SDK starts.
+2. When `<chat-messenger>` exists it registers, for every card tool name in section 3, a client-side function via `chatMessenger.presenter.registerClientSideFunctionForAllTools(<tool_name>, fn)`. `fn(args)` calls `chatMessenger.renderCustomCard([{type: "custom_template", name: "wgl-card", payload: {tool: <tool_name>, args: args}}])` and returns `{rendered: true}`.
+3. Fallback: it also listens to the `chat-messenger-response-received` event (`detail.raw.outputs[]`) and renders any `toolCalls` whose tool name is in the card list that the registered function did not already handle (de-duplicated by tool + args within 10 s).
+4. If the server delivers a card as a native rich element, the agent side can emit exactly `{"type": "custom_template", "name": "wgl-card", "payload": {"tool": "show_bill_trend_card", "args": {...}}}` in a `payload` and it renders with no extra client code.
+
+**Resolved in section 0 (was UNVERIFIED LIVE):** whether CES delivers widget tool (CUSTOM) results to the client as (a) `toolCalls` (client-side functions), (b) a `payload` rich element, or (c) something else. The SDK handles (a) and (b) as described; if the real traffic shows a different shape, only the small adapter in `assistant.js` (`registerTools` and `onResponse`) needs to change. Check with the browser Network tab on the first live run (look at the `outputs` of the response) and with `loggingLevel`/console.
+
+What the SDK does **not** allow:
+
+* No documented render hook for `widgetType: CUSTOM` and no way to replace the built-in renderers for `ORDER_SUMMARY`, `QUICK_ACTIONS`, `APPOINTMENT_*`, `OVERALL_SATISFACTION`, `CONTACT_FORM` (they are server-typed; the client may render them natively, we cannot restyle their markup, only theme variables).
+* No page-level CSS reaches into the chat (it lives in nested shadow roots); only `--chat-messenger-*` CSS variables inherit. That is why `wgl-card` carries its own stylesheet and reads the brand colours directly.
+* The message-list typing indicator, avatar ring and the open/close animation are internal to the SDK (only `bot-writing-image`, `bot-writing-text`, `bot-actor-image` attributes and the theme variables are configurable).
+* No documented public API to send a user message from outside. The working route is the one the SDK's own chips use internally: `renderCustomText(text, false)` (shows the customer bubble) + `presenter.sendQuery(text)` (sends it), then dispatch `chat-messenger-user-input-entered`. `assistant.js` uses exactly that. `presenter` is an undocumented-but-unminified property; if it is missing the card falls back to a console warning.
+
+### 1b. Session variables (page context)
+
+* Storage key is `"chat-messenger-" + "variables"` = **`chat-messenger-variables`**, in `window.sessionStorage` (verified: `getVariables` / `storeVariables`; the storage class is used unless the element has `storage-option="none"`).
+* It is read with `JSON.parse` **on every request** (text and welcome event: the body is `inputs: [{text|event}, {variables}]`), not only at init. So writing it before the widget opens works, and changing it on the next page is picked up on the next message.
+* The SDK wipes `variables` (with the other `chat-messenger-*` keys except the access token) when the session ends or expires, and on "new chat". `assistant.js` therefore writes `page_context` synchronously at script load **and again** on `chat-messenger-loaded`, `chat-messenger-context-registered`, `chat-messenger-session-id-set`, `chat-messenger-start-new-session`, `chat-messenger-open-changed`, and also calls `chatMessenger.setVariables()` when the element exists. Existing keys in the stored object are preserved (merge, not overwrite).
+* Server response `updatedVariables` can also be stored by the SDK; merging keeps them.
+
+### 1c. Events (all `CustomEvent`, `bubbles: true, composed: true`, so `window.addEventListener` works)
+
+| Event | detail | Use |
+| --- | --- | --- |
+| `chat-messenger-loaded` | none | register context / tools |
+| `chat-messenger-context-registered` | none | `registerContext` done |
+| `chat-messenger-open-changed` | `{isOpen, isCentered, isSideAnchored}` | chat window opened or closed (bubble) |
+| `chat-messenger-close` | none | closed |
+| `chat-messenger-request-sent` | request body | outgoing message |
+| `chat-messenger-response-received` | `{messages, data, raw}` | incoming response (`raw.outputs[]`) |
+| `chat-messenger-user-input-entered` | none | a user message was submitted (typed or chip) |
+| `chat-messenger-chip-clicked` | `{text, actionLink?}` | native chip |
+| `chat-messenger-button-clicked` | `{text, event, actionLink}` | native button element |
+| `chat-messenger-session-id-set`, `-session-ended`, `-session-expired`, `-start-new-session` | | session lifecycle |
+| `chat-messenger-error` | `{error}` | error |
+| `df-quick-actions-click` | `{action}` | native quick actions |
+
+Custom cards additionally fire `wgl-send` (detail `{text, tool}`, bubbles, composed, cancelable) just before they send; a host page (the preview page) can `preventDefault()` it to intercept.
+
+### 1d. Theme variables
+
+Read from `chat-messenger-default.css`: public tokens `--chat-messenger-color--{primary, on-primary, primary-container, on-primary-container, secondary, on-secondary, surface, surface-container(-low/-high), on-surface, on-surface-variant, outline(-active/-variant), error, link, state-layer-*}`, `--chat-messenger-shape--corner-value-{small,medium,large,extra-large}`, `--chat-messenger-spacing--*`, `--chat-messenger-typescale--*`, `--chat-messenger-font-family`, `--chat-messenger-elevation`; plus undocumented `--chat-messenger-internal-*` (titlebar, message, input, chips, chat-bubble, card, focus). `titlebar-background`, `message-user-background` and `chat-bubble-background` are used with the `background:` shorthand, so gradients work. Attributes on `<chat-messenger-chat-bubble>` used: `chat-subtitle` (the "Online" line), `bot-actor-image`, `bot-writing-text`, `placeholder-text`.
+
+### 1e. Welcome event
+
+`createContext({ ..., enableWelcomeEvent: true })` exists (default false). With the token broker it fires once per session after the access token resolves (`triggerWelcomeIntent`), sending the event `welcome` plus the stored variables, so `page_context` is present on the very first turn. The agent must handle the `welcome` event (greeting that uses `page_context`). Enabled in `widget-embed.html`.
+
+## 2. page_context
+
+`<body data-page-context="...">` on every page; `assistant.js` copies it to `window.wglPageContext` (index page is `home`) and writes sessionStorage `chat-messenger-variables` = `{"page_context": "<value>", ...existing}`.
+
+Values: `home`, `billing`, `service`, `safety`, `assistance`, `savings`, `business`, `choice`, `claims`, `energy`, `spanish`, `contact`, `notfound`.
+
+Agent side: read it as the session variable `page_context` (declare it in the app variables with a default of `home`). Suggested use: pick the greeting and the first suggested chips (billing -> pay or explain my bill; savings -> rebate match; claims -> claim status; safety -> emergency first). `spanish` means the visitor is on the Spanish page: greet in Spanish.
+
+## 3. Card payloads
+
+Rules for every card:
+
+* Tool name = the key below; `widgetType` should be **`CUSTOM`** for all of them (including `show_quick_actions`, `show_slot_picker`, `show_bill_summary_card`, `show_appointment_confirmation`, `show_csat_card`). If a tool keeps a built-in type (`QUICK_ACTIONS`, `ORDER_SUMMARY`, `APPOINTMENT_SCHEDULER`, ...), the server/SDK may render it natively and our `wgl-card` will not be used; the renderer still exists for each of these names.
+* Only real numbers from tool results; nothing invented. Money is a plain number in dollars (not a string), months are oldest first, `period` is a short label such as `"Oct 2025"` or `"Oct"` (the card shows the first three letters).
+* Unknown or missing optional fields are tolerated (card hides the row). Missing required arrays render an "unavailable" note.
+* **Every actionable button sends `action_message` back as the customer's next message** (it is shown as a customer bubble, then sent to the agent). Keep it a natural sentence the agent can route, for example `"Sign me up for budget billing"`.
+* Agent text still carries the same facts (voice parity); cards are enhancement only.
+
+### Existing (unchanged shapes)
+
+```json
+show_usage_history_card   {"unit": "therms", "months": [{"period": "Oct 2025", "usage": 31}]}
+show_bill_summary_card    {"title": "Payment received", "amount": 142.55, "convenience_fee": 0, "due_date": "Nov 12, 2026",
+                           "confirmation_number": "WG-123456", "card_last4": "4242"}      // required: title, amount
+show_quick_actions        {"prompt": "How would you like to verify?", "options": ["Text me a code", "Use my PIN", "Other"]}  // up to 3
+show_slot_picker          {"service_type": "start", "slots": [{"slot": "S1", "date": "Tue Nov 3", "window": "8am-12pm"}]}   // up to 3
+show_appointment_confirmation {"service_type": "start", "date": "Tue Nov 3", "window": "8am-12pm", "address": "12 Oak St",
+                           "confirmation_numbers": ["AP-1001"]}
+show_emergency_card       {"safety_text": "...", "emergency_number": "800-752-7520"}
+show_csat_card            {"prompt": "How did we do?"}
+```
+
+Messages the existing cards send: quick-action chip -> the option label; slot -> `"I'll take <date>, <window> (slot <slot>)"` unless the slot has its own `action_message`; CSAT star -> `"I rate this experience N out of 5"`.
+Not rendered by us (left to the SDK): `show_callback_form`.
+
+### New cards
+
+```json
+show_bill_trend_card       {"months": [{"period": "Oct 2025", "amount": 96.10, "is_current": false}, ...,
+                                       {"period": "Sep 2026", "amount": 142.55, "is_current": true}],
+                            "highlight_note": "$46 higher than last month"}       // highlight_note optional; one is_current
+
+show_weather_usage_card    {"unit": "therms",
+                            "months": [{"period": "Jan 2026", "usage": 142, "hdd": 905}, ...]}      // hdd = heating degree days
+
+show_bill_breakdown_card   {"total": 142.55,
+                            "items": [{"label": "Gas supply", "amount": 61.20}, {"label": "Delivery", "amount": 48.10}, ...]}
+
+show_insights_carousel     {"insights": [{"id": "ins1", "title": "Usage is up 38%", "summary": "Colder weather explains most of it.",
+                                          "severity": "info|attention|urgent|saving",
+                                          "action_label": "Explain my bill", "action_message": "Why is my bill higher this month?"}]}   // 1-5
+
+show_rebate_card           {"rebates": [{"id": "r1", "name": "High-efficiency furnace", "amount": "$800", "deadline": "Dec 1, 2026",
+                                         "status_note": "You may qualify", "action_label": "Start claim",
+                                         "action_message": "Help me claim the furnace rebate"}]}    // amount is a display string
+
+show_claim_status_card     {"claim_id": "CL-2041",
+                            "steps": [{"label": "Submitted", "state": "done|current|todo"}, {"label": "In review", "state": "current"}, {"label": "Paid", "state": "todo"}],
+                            "note": "Reviews take up to 10 business days."}
+
+show_payment_receipt_card  {"amount": 142.55, "date": "Oct 18, 2026", "confirmation": "WG-123456", "method_last4": "4242"}
+```
+
+Limits the renderer enforces: charts show up to 13 months; carousel up to 6 items; donut up to 6 items (rest grouped under "Other"); labels are clipped by CSS, not truncated in data.
+
+### Quality bar for the tool author
+
+* One card per turn, placed after the supporting tool call; keep the spoken/text answer short because the card carries the detail.
+* `severity` must be one of the four values; the badge text (not just colour) shows it.
+* `action_message` must be phrased as the customer would say it; it is echoed in the transcript.
+* Do not put a `$` in numeric fields; `show_rebate_card.amount` is the only money field that is a display string.
