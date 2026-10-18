@@ -1,0 +1,131 @@
+/* ==========================================================================
+   widget-theme.css - restyles the Google CX Agent Studio web widget
+   (<chat-messenger>, SDK v1.16) so it blends with the Washington Gas mock site.
+
+   Loaded AFTER the three SDK head lines (script, chat-messenger-default.css,
+   chat-messenger-layout.css) so these values override the defaults.
+
+   Only variables that exist in the SDK are used. They were read from
+   chat-messenger-default.css, the official docs ("CSS customization") and the
+   SDK bundle itself:
+     --chat-messenger-color--*, --chat-messenger-shape--*, --chat-messenger-font-family,
+     --chat-messenger-elevation        : documented public design tokens
+     --chat-messenger-internal-*       : undocumented, but read by the widget with
+                                         var(--x, fallback); used for the title bar,
+                                         bubble, message colours and focus ring.
+   "internal" names may change in a future SDK version. The SDK URLs in
+   widget-embed.html pin v1.16, so they are stable until you change that version.
+
+   Palette: navy #002a5c, brand blue #0072bc, gold #ffc72c, pale blue #f3fafe,
+   aqua #c0ecff. Font: Figtree (already loaded by the site).
+   ========================================================================== */
+
+chat-messenger {
+  /* ---- Position: chat window docks bottom right (align-bottom-right) with a 24px side offset
+          (SDK default 16px). The launcher is positioned by the rule below this block. ---- */
+  --chat-messenger-entry-point-button-z-index: 999;
+  --chat-messenger-internal-chat-window-width: 400px;
+  --chat-messenger-internal-chat-window-height: min(680px, calc(100vh - 48px));
+  --chat-messenger-internal-chat-window-offset: 24px;
+
+  /* ---- Typeface ---- */
+  --chat-messenger-font-family: "Figtree", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* ---- Public colour tokens ---- */
+  --chat-messenger-color--surface: #ffffff;                 /* chat body + footer */
+  --chat-messenger-color--surface-container: #ffffff;       /* cards / carousels */
+  --chat-messenger-color--surface-container-high: #f3fafe;  /* input field fill */
+  --chat-messenger-color--primary: #0072bc;                 /* primary buttons */
+  --chat-messenger-color--on-primary: #ffffff;              /* white on #0072bc = 5.1:1 */
+  --chat-messenger-color--primary-container: #0072bc;       /* user message bubbles */
+  --chat-messenger-color--on-primary-container: #ffffff;
+  --chat-messenger-color--secondary: #ffc72c;               /* send button accent (gold) */
+  --chat-messenger-color--on-secondary: #002a5c;            /* navy on gold = 9:1 */
+  --chat-messenger-color--on-surface: #002a5c;              /* body text (navy on white 14:1) */
+  --chat-messenger-color--on-surface-variant: #495057;      /* secondary text 7.5:1 on white */
+  --chat-messenger-color--outline: #ced4da;
+  --chat-messenger-color--outline-active: #0072bc;          /* focused input border */
+  --chat-messenger-color--link: #00589a;
+  --chat-messenger-color--link-hover: #002a5c;
+  --chat-messenger-color--error: #b3261e;
+
+  /* ---- Shape: 12px rounded corners like the site cards ---- */
+  --chat-messenger-shape--corner-value-small: 8px;
+  --chat-messenger-shape--corner-value-medium: 12px;
+  --chat-messenger-shape--corner-value-large: 12px;
+  --chat-messenger-shape--corner-value-extra-large: 12px;   /* main chat window */
+  --chat-messenger-elevation: 0 18px 48px rgba(0, 42, 92, .28);
+  --chat-messenger-internal-chat-border-radius: 12px;
+
+  /* ---- Title bar: navy with white text ---- */
+  --chat-messenger-internal-titlebar-background: #002a5c;
+  --chat-messenger-internal-titlebar-font-color: #ffffff;
+  --chat-messenger-internal-titlebar-subtitle-font-color: #c0ecff;
+  --chat-messenger-internal-titlebar-border-bottom: 4px solid #ffc72c;  /* gold bottom stroke, like the site buttons */
+  --chat-messenger-internal-titlebar-title-font-weight: 700;
+  --chat-messenger-internal-titlebar-padding: 14px 16px 12px 16px;
+  --chat-messenger-internal-titlebar-icon-font-color: #ffffff;
+  --chat-messenger-internal-titlebar-button-background: transparent;  /* default is the white surface colour */
+  --chat-messenger-internal-titlebar-button-color: #ffffff;
+  --chat-messenger-internal-titlebar-button-color-hover: #ffffff;
+  --chat-messenger-internal-titlebar-button-background: transparent;
+  --chat-messenger-internal-titlebar-button-background-hover: rgba(255, 255, 255, .16);
+
+  /* ---- Messages ---- */
+  --chat-messenger-internal-message-user-background: #0072bc;
+  --chat-messenger-internal-message-user-font-color: #ffffff;
+  --chat-messenger-internal-message-bot-background: #f3fafe;
+  --chat-messenger-internal-message-bot-font-color: #002a5c;
+  --chat-messenger-internal-message-bot-border: 1px solid #c0ecff;
+  --chat-messenger-internal-message-border-radius: 12px;
+  --chat-messenger-internal-message-bot-border-top-left-radius: 2px;
+  --chat-messenger-internal-message-user-border-top-right-radius: 2px;
+
+  /* ---- Input box + send button ---- */
+  --chat-messenger-internal-input-box-border-radius: 12px;
+  --chat-messenger-internal-input-box-border: 1.5px solid #ced4da;
+  --chat-messenger-internal-input-font-color: #212529;
+  --chat-messenger-internal-input-placeholder-font-color: #6c757d;
+  --chat-messenger-internal-send-icon-background: #ffc72c;
+  --chat-messenger-internal-send-icon-color: #002a5c;
+  --chat-messenger-internal-send-icon-border-radius: 8px;
+
+  /* ---- Focus ring: gold outer ring with a navy contrast ring ---- */
+  --chat-messenger-internal-focus-color: #ffc72c;
+  --chat-messenger-internal-focus-color-contrast: #002a5c;
+
+  /* ---- Launcher bubble: brand blue with a gold ring ---- */
+  --chat-messenger-internal-chat-bubble-background: #0072bc;
+  --chat-messenger-internal-chat-bubble-icon-color: #ffffff;
+  --chat-messenger-internal-chat-bubble-border: 3px solid #ffc72c;
+  --chat-messenger-internal-chat-bubble-size: 60px;
+
+  /* ---- Chips / quick-reply buttons ---- */
+  --chat-messenger-internal-chips-border-radius: 8px;
+  --chat-messenger-internal-button-border-radius: 8px;
+}
+
+/* Launcher: the SDK leaves launcher placement to the host page, so pin it bottom right, 24px offset.
+   (The chat window is positioned by the SDK itself via align-bottom-right.) */
+chat-messenger-chat-bubble {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 999;
+}
+@media (max-width: 520px) {
+  chat-messenger-chat-bubble { right: 16px; bottom: 16px; }
+}
+
+/* Title-bar action buttons are light-DOM children (slot="titlebar-actions") and the widget
+   colours them with --chat-messenger-color--on-surface-variant, which would be dark on navy.
+   Scope white to those elements only so body text keeps its dark colour. */
+chat-reset-session-button,
+chat-toggle-dialog-button,
+chat-messenger-close-button {
+  --chat-messenger-color--on-surface-variant: #ffffff;
+}
+
+/* Hide the Google reCAPTCHA badge area on this demo (token broker runs without reCAPTCHA). */
+.grecaptcha-badge { visibility: hidden; }
+
