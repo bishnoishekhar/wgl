@@ -447,6 +447,21 @@
     dollar: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15.500V19h-2v-1.500c-1.500-.3-2.700-1.200-2.800-2.800h2c.1.700.8 1.200 1.900 1.200 1 0 1.700-.4 1.700-1.100 0-.7-.5-1-2-1.400-1.900-.5-3.400-1.200-3.400-3.100 0-1.400 1.100-2.400 2.600-2.700V5h2v1.700c1.400.3 2.400 1.300 2.500 2.700h-2c-.1-.7-.7-1.100-1.700-1.100-.9 0-1.500.4-1.500 1 0 .6.5.9 2 1.300 1.800.5 3.500 1.100 3.500 3.200 0 1.500-1.200 2.500-2.800 2.700z"/></svg>'
   };
 
+  /* Rev 23: icon names the options, compare and checklist cards accept (SVG only, never emoji characters) */
+  var OICON = {
+    card: '<svg viewBox="0 0 24 24" width="20" height="20"><rect x="2.500" y="5" width="19" height="14" rx="2.500" fill="none" stroke="currentColor" stroke-width="2"/><path d="M2.500 10h19" stroke="currentColor" stroke-width="2"/><path d="M6 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    bank: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3 2.500 8.500h19L12 3z" fill="currentColor"/><path d="M5 11v7M10 11v7M14 11v7M19 11v7M3 20.500h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>',
+    calendar: ICON.cal,
+    home: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3 2.500 11H5v9h5v-6h4v6h5v-9h2.500L12 3z" fill="currentColor"/></svg>',
+    flame: ICON.flame,
+    check: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 12.500l4.500 4.500L19 7.500"/></svg>',
+    money: ICON.dollar,
+    info: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="9.500" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6M12 7.500v.2" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="9.500" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5.500l3.500 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6.600 10.800a15 15 0 0 0 6.600 6.600l2.200-2.200a1 1 0 0 1 1-.25 11.400 11.400 0 0 0 3.600.6 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.500a1 1 0 0 1 1 1c0 1.300.2 2.500.6 3.600a1 1 0 0 1-.25 1l-2.250 2.200z"/></svg>'
+  };
+  function oicon(name) { return OICON[name] || OICON.check; }
+
   /* ---- chart builders (inline SVG) ---- */
   function svgOpen(w, h, label) {
     return '<svg class="chart" viewBox="0 0 ' + w + " " + h + '" role="img" aria-label="' + esc(label) + '" preserveAspectRatio="xMidYMid meet">';
@@ -563,18 +578,34 @@
       var cur = -1;
       ms.forEach(function (m, i) { if (m.is_current) { cur = i; } });
       if (cur < 0) { cur = ms.length - 1; }
-      var follow = a.action_label && a.action_message ?
-        '<div class="chips follow" role="group" aria-label="Next step" data-lock="1"><button type="button" class="chip" data-send="' + esc(a.action_message) + '">' + esc(a.action_label) + "</button></div>" : "";
+      var chipList = (a.action_label && a.action_message ? [{ label: a.action_label, message: a.action_message }] : [])
+        .concat(arr(a.extra_actions, 2).filter(function (x) { return x && x.label && x.message; }));
+      var follow = chipList.length ?
+        '<div class="chips follow" role="group" aria-label="Next step" data-lock="1">' + chipList.map(function (c) {
+          return '<button type="button" class="chip" data-send="' + esc(c.message) + '">' + esc(c.label) + "</button>";
+        }).join("") + "</div>" : "";
+      /* Rev 25: optional reasons (every factor of the change with its amount); nothing is drawn when it is absent */
+      var rs = arr(a.reasons, 6).filter(function (r) { return r && r.label; });
+      var reasons = rs.length ?
+        '<ul class="rsn" aria-label="Why the bill changed">' + rs.map(function (r) {
+          var up = r.direction === "up", down = r.direction === "down";
+          var amt = r.amount === undefined || r.amount === null ? "" : (up ? "+" : down ? "-" : "") + money(Math.abs(num(r.amount)));
+          return '<li><span class="rico" aria-hidden="true">' + oicon(r.icon) + '</span><span class="rl">' + esc(r.label) + "</span>" +
+            (amt ? '<b class="ra' + (up ? " up" : down ? " dn" : "") + '">' + esc(amt) + "</b>" : "") + "</li>";
+        }).join("") + "</ul>" : "";
       return head("Your bill, month by month", "Amount billed each month", ICON.chart) +
         barChart({ values: ms.map(function (m) { return num(m.amount); }), labels: ms.map(function (m) { return m.period; }), cur: cur, fmt: money,
           aria: "Monthly bill amounts: " + ms.map(function (m) { return m.period + " " + money(m.amount); }).join(", ") }) +
-        (a.highlight_note ? '<p class="note"><span aria-hidden="true">&#9679;</span> ' + esc(a.highlight_note) + "</p>" : "") + follow;
+        (a.highlight_note ? '<p class="note"><span aria-hidden="true">&#9679;</span> ' + esc(a.highlight_note) + "</p>" : "") + reasons + follow;
     },
     show_weather_usage_card: function (a) {
       var ms = arr(a.months, 13), unit = a.unit || "units";
       if (!ms.length) { return head("Usage and weather", "", ICON.cloud) + empty(); }
       return head("Usage vs. the weather", "Colder months need more heat", ICON.cloud) + weatherChart(ms, unit) +
-        '<div class="legend"><span><i class="sw bar"></i>Gas used (' + esc(unit) + ')</span><span><i class="sw ln"></i>Heating degree days</span></div>';
+        '<div class="legend"><span><i class="sw bar"></i>Gas used (' + esc(unit) + ')</span><span><i class="sw ln"></i>Heating degree days</span></div>' +
+        (arr(a.stats, 3).length ? '<div class="stats wstats">' + arr(a.stats, 3).map(function (t) {
+          return '<div><span class="k">' + esc(t && t.label) + "</span><b>" + esc(t && t.value) + "</b></div>";
+        }).join("") + "</div>" : "");
     },
     show_bill_breakdown_card: function (a) {
       var items = arr(a.items, 40).map(function (i) { return { label: i.label, amount: num(i.amount) }; });
@@ -683,6 +714,47 @@
     },
     show_csat_card: function (a) {
       return head(a.prompt || "How did we do?", "Tap a star", "") + '<div class="stars" data-lock="1">' + stars() + "</div>";
+    },
+    /* Rev 23 chat-screen cards. Same payload rules as every card: all strings are escaped, missing fields are tolerated. */
+    show_options_card: function (a) {
+      var os = arr(a.options, 4);
+      if (!os.length) { return head(a.title || "Your options", "", ICON.flame) + empty(); }
+      return head(a.title || "Your options", a.prompt || "Tap one to continue", ICON.flame) +
+        '<div class="optl" role="group" aria-label="' + esc(a.title || a.prompt || "Your options") + '" data-lock="1">' + os.map(function (o) {
+          var msg = o.action_message || o.label || "";
+          return '<button type="button" class="opt' + (o.highlight ? " hl" : "") + '" data-send="' + esc(msg) + '">' +
+            '<span class="ico" aria-hidden="true">' + oicon(o.icon) + "</span>" +
+            '<span class="ot"><span class="ol">' + esc(o.label) + "</span>" + (o.benefit ? '<span class="ob">' + esc(o.benefit) + "</span>" : "") + "</span>" +
+            (o.badge ? '<span class="bd">' + esc(o.badge) + "</span>" : "") + '<span class="go" aria-hidden="true">&#8250;</span></button>';
+        }).join("") + "</div>" + (a.footnote ? '<p class="fn">' + esc(a.footnote) + "</p>" : "");
+    },
+    show_compare_table_card: function (a) {
+      var cols = arr(a.columns, 4), rows = arr(a.rows, 6);
+      if (!cols.length || !rows.length) { return head(a.title || "Compare", "", ICON.chart) + empty(); }
+      var hc = typeof a.highlight_column === "number" && a.highlight_column >= 0 && a.highlight_column < cols.length ? Math.floor(a.highlight_column) : -1;
+      var th = cols.map(function (c, i) {
+        return '<th scope="col"' + (i === hc ? ' class="hl"' : "") + ">" + (i === hc && a.highlight_label ? '<span class="hb">' + esc(a.highlight_label) + "</span>" : "") + esc(c) + "</th>";
+      }).join("");
+      var body = rows.map(function (r) {
+        var cells = arr(r.cells, 4);
+        return '<tr><th scope="row">' + esc(r.label) + (r.note ? '<span class="nt">' + esc(r.note) + "</span>" : "") + "</th>" +
+          cols.map(function (_, i) { return "<td" + (i === hc ? ' class="hl"' : "") + ">" + esc(cells[i] === undefined || cells[i] === null ? "" : cells[i]) + "</td>"; }).join("") + "</tr>";
+      }).join("");
+      return head(a.title || "Compare", "", ICON.chart) +
+        '<div class="cmpw" role="region" tabindex="0" aria-label="' + esc(a.title || "Comparison") + '"><table class="cmp"><caption class="sr">' + esc(a.title || "Comparison") + "</caption>" +
+        '<thead><tr><th scope="col"><span class="sr">Option</span></th>' + th + "</tr></thead><tbody>" + body + "</tbody></table></div>" +
+        (a.caption ? '<p class="fn">' + esc(a.caption) + "</p>" : "") +
+        (a.action_label && a.action_message ? '<div class="cact">' + actionBtn(a.action_label, a.action_message, "") + "</div>" : "");
+    },
+    show_checklist_card: function (a) {
+      var its = arr(a.items, 6);
+      if (!its.length) { return head(a.title || "Good to know", "", ICON.check) + empty(); }
+      var steps = a.style === "steps", tag = steps ? "ol" : "ul";
+      return head(a.title || "Good to know", "", ICON.check) + "<" + tag + ' class="cl">' + its.map(function (it, i) {
+        return "<li>" + (steps ? '<span class="dot" aria-hidden="true">' + (i + 1) + "</span>" : '<span class="ico" aria-hidden="true">' + oicon(it.icon) + "</span>") +
+          '<span class="ct">' + esc(it.text) + (it.detail ? '<span class="cd">' + esc(it.detail) + "</span>" : "") + "</span></li>";
+      }).join("") + "</" + tag + ">" + (a.footnote ? '<p class="fn">' + esc(a.footnote) + "</p>" : "") +
+        (a.action_label && a.action_message ? '<div class="cact">' + actionBtn(a.action_label, a.action_message, "") + "</div>" : "");
     }
   };
   var WGL_TOOLS = Object.keys(CARDS);
@@ -768,6 +840,33 @@
     ".stars{display:flex;gap:2px;justify-content:center}.star{background:none;border:0;padding:2px;color:#b6c8d9;cursor:pointer;transition:transform .12s,color .12s}.star:hover,.star:focus-visible{color:#d99a00;transform:scale(1.15)}" +
     "[data-lock].done .star.picked{color:#d99a00;opacity:1;background:none}" +
     ".empty{margin:0;font-size:13px;color:var(--ink2)}" +
+    ".sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}" +
+    ".optl{display:flex;flex-direction:column;gap:8px}" +
+    ".opt{font:inherit;display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:10px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--pale);color:var(--navy);cursor:pointer;transition:all .15s;animation:rise .3s both}" +
+    ".opt:nth-child(2){animation-delay:60ms}.opt:nth-child(3){animation-delay:120ms}.opt:nth-child(4){animation-delay:180ms}" +
+    ".opt:hover{border-color:var(--blue);background:#e3f1fb;transform:translateY(-1px)}" +
+    ".opt.hl{border-color:var(--gold);background:#fff8e1;box-shadow:inset 4px 0 0 var(--gold)}" +
+    ".opt .ot{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}.opt .ol{font-weight:700;font-size:14px;line-height:1.25}.opt .ob{font-size:12.5px;color:var(--ink2);line-height:1.3}" +
+    ".opt .bd{flex:none;align-self:flex-start;font-size:11px;font-weight:700;background:var(--gold);color:var(--navy);border-radius:999px;padding:2px 8px}" +
+    ".opt .go{flex:none;color:var(--blue);font-size:22px;line-height:1}" +
+    ".opt .ico,.cl .ico{width:32px;height:32px;border-radius:10px}" +
+    ".fn{margin:10px 0 0;font-size:12px;color:var(--ink2);line-height:1.4}.cact{margin-top:10px}" +
+    ".cmpw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;outline-offset:2px}" +
+    ".cmp{width:100%;border-collapse:collapse;font-size:13px}" +
+    ".cmp th,.cmp td{padding:8px 9px;text-align:center;border-bottom:1px solid #e9f0f6;font-variant-numeric:tabular-nums}" +
+    ".cmp tbody tr:last-child th,.cmp tbody tr:last-child td{border-bottom:0}" +
+    ".cmp thead th{background:var(--navy);color:#fff;font-size:12px;font-weight:700;vertical-align:bottom}" +
+    ".cmp tbody th{text-align:left;font-weight:700;background:var(--pale);min-width:84px}" +
+    ".cmp .nt{display:block;font-weight:400;font-size:11.5px;color:var(--ink2);margin-top:1px}" +
+    ".cmp td.hl{background:#fff8e1;font-weight:700}.cmp thead th.hl{background:var(--gold);color:var(--navy)}" +
+    ".cmp .hb{display:block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px}" +
+    ".cl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}.cl li{display:flex;gap:10px;align-items:flex-start}" +
+    ".cl .ct{flex:1;min-width:0;font-size:14px;line-height:1.35;font-weight:600;padding-top:5px}.cl .cd{display:block;font-weight:400;font-size:12.5px;color:var(--ink2);margin-top:1px}" +
+    ".cl .dot{background:var(--navy);border-color:var(--navy);color:#fff}" +
+    ".rsn{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}.rsn li{display:flex;align-items:center;gap:9px;font-size:13.5px;line-height:1.3}" +
+    ".rsn .rico{flex:none;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--pale);border:1px solid #c0ecff;color:var(--navy)}.rsn .rico svg{width:16px;height:16px}" +
+    ".rsn .rl{flex:1;min-width:0}.rsn .ra{flex:none;font-variant-numeric:tabular-nums;color:#7a3e00}.rsn .ra.dn{color:#1d5b33}" +
+    ".wstats{flex-wrap:wrap}.wstats>div{flex:1 1 40%;min-width:0}" +
     "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.line{stroke-dasharray:none}}";
 
   /* Bare cards (no outer frame): they draw their own frame */

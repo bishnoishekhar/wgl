@@ -121,6 +121,43 @@
   card("show_csat_card", { prompt: "How did we do today?" });
   card("show_emergency_card", { safety_text: "If you smell gas, leave the building now. Do not use switches, phones or flames inside. Call from outside.", emergency_number: "800-752-7520" });
 
+  tag("Rev 23 chat-screen cards (new): short text, then one card");
+  bubble("Your balance is $82.67. How would you like to pay?", "bot");
+  card("show_options_card", { title: "How would you like to pay?", prompt: "Tap one to continue", options: [
+    { id: "visa", label: "Visa ending 4521", benefit: "Your card on file, no card fee in Virginia", badge: "No card fee", icon: "card", highlight: true, action_message: "Pay with my Visa ending 4521" },
+    { id: "ach", label: "Checking account", benefit: "One-time eCheck / ACH payment", icon: "bank", action_message: "I'd like to pay from my checking account" },
+    { id: "budget", label: "Budget Plan", benefit: "Spread heating costs evenly across the year", icon: "calendar", action_message: "Tell me about the Budget Plan" } ],
+    footnote: "You can cancel a payment until it posts." });
+  card("show_compare_table_card", { title: "Payment plans for $323.64 past due", columns: ["Monthly", "Down payment"], rows: [
+    { label: "6 months", cells: ["$53.94", "None"] }, { label: "12 months", cells: ["$18.64", "$100.00"] }, { label: "24 months", cells: ["$13.49", "None"], note: "Energy assistance only" } ],
+    highlight_column: 0, highlight_label: "Pay over time", caption: "All plans are interest-free.", action_label: "Help me choose", action_message: "Help me choose a payment plan" });
+  card("show_checklist_card", { title: "Moving your gas service", items: [
+    { icon: "calendar", text: "At least 2 business days notice", detail: "That is 48 hours" },
+    { icon: "money", text: "Gas on at your new address", detail: "$14.85 setup fee" },
+    { icon: "money", text: "Gas off at your current address", detail: "$60.00 fee" },
+    { icon: "home", text: "Someone 18 or older at home", detail: "To give access" } ], footnote: "Weekends and holidays do not count." });
+  card("show_checklist_card", { title: "How to read your meter", style: "steps", items: [
+    { text: "Find the dials on your gas meter" }, { text: "Read the numbers left to right" }, { text: "Send them here or in your account" } ],
+    action_label: "Submit a reading", action_message: "I want to submit a meter reading" });
+
+  tag("Rev 25 restructure not remove (additive): the reasons list inside the trend card, the facts row inside the weather card");
+  bubble("That is a big jump, and I see why.", "bot");
+  card("show_bill_trend_card", { highlight_note: "$54 higher than last month", months: [
+    { period: "Oct 2025", amount: 59.22 }, { period: "Nov 2025", amount: 120.75 }, { period: "Dec 2025", amount: 169.58 }, { period: "Jan 2026", amount: 230.3 },
+    { period: "Feb 2026", amount: 232.46 }, { period: "Mar 2026", amount: 174.03 }, { period: "Apr 2026", amount: 139.71 }, { period: "May 2026", amount: 81.63 },
+    { period: "Jun 2026", amount: 43.58 }, { period: "Jul 2026", amount: 30.14 }, { period: "Aug 2026", amount: 29.66 }, { period: "Sep 2026", amount: 27.39 },
+    { period: "Oct 2026", amount: 81.36, is_current: true } ],
+    reasons: [
+      { label: "Colder weather, more heating", amount: 41.01, direction: "up", icon: "flame" },
+      { label: "Longer billing cycle (34 vs 28 days)", amount: 5.94, direction: "up", icon: "calendar" },
+      { label: "Estimated meter read corrected", amount: 5.49, direction: "up", icon: "info" } ],
+    action_label: "See weather vs usage", action_message: "Show me how the weather lined up with my usage",
+    extra_actions: [{ label: "Tell me about the Budget Plan", message: "Tell me about the Budget Plan" }] });
+  card("show_weather_usage_card", { unit: "therms", months: [
+    { period: "Apr 2026", usage: 104.5, hdd: 409 }, { period: "May 2026", usage: 56.1, hdd: 190 }, { period: "Jun 2026", usage: 24.4, hdd: 53 },
+    { period: "Jul 2026", usage: 13.2, hdd: 6 }, { period: "Aug 2026", usage: 12.8, hdd: 2 }, { period: "Sep 2026", usage: 10.9, hdd: 20 }, { period: "Oct 2026", usage: 50.3, hdd: 137 } ],
+    stats: [ { label: "Heating degree days", value: "137 (20 last month)" }, { label: "Gas used in Oct 2026", value: "50.3 therms" }, { label: "Peak month", value: "Feb 2026, 181.5 therms" } ] });
+
   var t = document.createElement("div"); t.className = "typing"; t.setAttribute("aria-label", "Assistant is typing");
   t.innerHTML = "<i></i><i></i><i></i>"; tag("typing indicator (reference)"); box.appendChild(t);
 

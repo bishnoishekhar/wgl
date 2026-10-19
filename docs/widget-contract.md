@@ -25,6 +25,7 @@ Checked against the live WGL app with `Sessions.run` (raw `RunSessionResponse`, 
 * The card locks (chips and toggle disabled, chosen chip highlighted) on a chip tap or on any `chat-messenger-user-input-entered`.
 * Accessibility: toggle is a `role=group` of `aria-pressed` buttons, the translated greeting sits in an `aria-live=polite` region, chips are native buttons with the gold focus ring, animations stop under `prefers-reduced-motion`.
 * `show_bill_trend_card` accepts optional `action_label` and `action_message`: rendered as one chip under the chart (used for "See weather vs usage", so only one card is delivered per reply).
+* Rev 25 (additive, restructure not remove). `show_bill_trend_card` also accepts optional `reasons` (up to 6 objects `{label, amount, direction: up|down|flat, icon?}`; the icon is a name from the card icon set, never an emoji) drawn as a list under the highlight note, each with a signed amount, and optional `extra_actions` (up to 2 more chips `{label, message}` beside the first button, used for the Budget Plan offer). `show_weather_usage_card` accepts optional `stats` (up to 3 `{label, value}` facts drawn as a row under the legend: heating degree days against last month, gas used this month, the peak month). Both come from tool data: `run_high_bill_diagnosis` returns `reasons` and `reasons_total_note`, `get_usage_history` returns `weather_stats`. When the new fields are absent the card HTML and pixels are identical to before (screenshot diff of `widget-preview.html` at 420 and 375 px, zero changed pixels over every earlier card).
 
 Sections 1 to 3 below were written before this check; where they say `wgl-card` receives `{tool, args}` from the platform, read section 0 instead. Card field shapes in section 3 are unchanged: they are the contents of the inner `payload`.
 
@@ -175,3 +176,33 @@ ormalizeMessages) now converts such built-in elements into the matching cx-show-
 ## 0c. Rev 20: one insight per proactive reply
 
 `show_insights_carousel` is also used for the single suggestion of a proactive moment (after a task, after a bill explanation, or after something the customer said): the payload then holds exactly ONE insight, with `action_label` and `action_message` as its button (for example "Send me bill tips" sends "Send me the tips for managing my bill"). The review the customer asked for still shows up to three. The call shape is unchanged: `{payload: {name: "cx-show-insights-carousel", payload: {insights: [...]}}}`; a call that sends the insights without the inner `name` reaches the page as a `custom_template` with no element and is not rendered (seen once live at the root agent; the instructions now spell the shape out).
+
+## 0d. Rev 23: chat-screen redesign (three new cards, markdown and emoji in chat text)
+
+Chat text is short (at most two sentences, about 30 words) and the card carries the detail. The SDK renders the agent text as markdown (marked + sanitizer): `- ` bullets, `**bold**` and `[label](https://...)` links work; tables, headings and numbered lists are not used. The theme font stack now ends with `"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji"` so emoji render in colour (widget-theme.css, additive). Voice never receives emoji or markdown: the chat rules are keyed on `{channel}` and the after_model callback strips them if one slips into a voice reply.
+
+Existing cards, their renderers and styles are unchanged (checked by screenshot diff of `widget-preview.html`). Three cards were added to `assistant.js` (same shadow DOM, theme variables, accessible, reduced motion, tested at 375 px). Call shape as for every card: `{payload: {name: "cx-<tool-dashed>", payload: {...}}, summary}`. Icons are names mapped to inline SVG, never emoji characters. One widget per reply: a new card replaces the quick-action chips in that reply.
+
+```json
+show_options_card          // cx-show-options-card, 2-4 options, tap sends action_message
+  {"title": "How would you like to pay?", "prompt": "Tap one to continue",
+   "options": [{"id": "visa", "label": "Visa ending 4521", "benefit": "Your card on file", "badge": "No card fee",
+                "icon": "card|bank|calendar|home|flame|check|money|info|clock|phone", "highlight": true,
+                "action_message": "Pay with my Visa ending 4521"}],
+   "footnote": "You can cancel a payment until it posts."}      // required: options (label and action_message per option)
+
+show_compare_table_card    // cx-show-compare-table-card, up to 4 columns and 6 rows, cells are display strings
+  {"title": "Payment plans for $323.64 past due", "columns": ["Monthly", "Down payment"],
+   "rows": [{"label": "6 months", "cells": ["$53.94", "None"], "note": "optional"}],
+   "highlight_column": 0, "highlight_label": "Pay over time", "caption": "All plans are interest-free.",
+   "action_label": "Help me choose", "action_message": "Help me choose a payment plan"}   // required: title, columns, rows
+
+show_checklist_card        // cx-show-checklist-card, up to 6 items, bullets (icon per item) or steps (numbered)
+  {"title": "Moving your gas service", "style": "bullets|steps",
+   "items": [{"icon": "calendar", "text": "At least 2 business days notice", "detail": "That is 48 hours"}],
+   "footnote": "Weekends and holidays do not count.", "action_label": "...", "action_message": "..."}   // required: title, items
+```
+
+Renderer notes: the options rows are native buttons in a locked group (one tap, then the group is disabled and the chosen row marked); the table sits in a focusable, horizontally scrollable region with a hidden caption, row and column headers (`th scope`), and an optional highlighted column with a text tag (not colour alone); the checklist is a `ul` or an `ol`. Missing fields are tolerated and an empty list shows the "not available" note.
+
+Agents: `show_options_card` and `show_compare_table_card` and `show_checklist_card` on billing_payments_agent; options and compare on hardship_agent; checklist on service_agent. WGL only (SEMCO is paused and has none of them). `get_verbatim_string` returns an optional chat wording (`text_chat_en` / `text_chat_es`, only the two WNA explanation keys) when `channel` is chat; voice always reads `text_en` / `text_es`.

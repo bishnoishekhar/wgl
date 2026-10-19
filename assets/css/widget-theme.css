@@ -29,7 +29,7 @@ chat-messenger {
   --chat-messenger-internal-chat-window-offset: 24px;
 
   /* ---- Typeface ---- */
-  --chat-messenger-font-family: "Figtree", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --chat-messenger-font-family: "Figtree", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji";
 
   /* ---- Public colour tokens ---- */
   --chat-messenger-color--surface: #ffffff;                 /* chat body + footer */
