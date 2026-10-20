@@ -158,16 +158,18 @@
     { period: "Jul 2026", usage: 13.2, hdd: 6 }, { period: "Aug 2026", usage: 12.8, hdd: 2 }, { period: "Sep 2026", usage: 10.9, hdd: 20 }, { period: "Oct 2026", usage: 50.3, hdd: 137 } ],
     stats: [ { label: "Heating degree days", value: "137 (20 last month)" }, { label: "Gas used in Oct 2026", value: "50.3 therms" }, { label: "Peak month", value: "Feb 2026, 181.5 therms" } ] });
 
-  tag("Rev 27 speech pilot (high bill only): voice mode, the long spoken text is hidden and display_text leads the card (typed chat looks as in Rev 25 above)");
-  card("show_bill_trend_card", { display_text: "That is a big jump, and I see why.", _lead: true, highlight_note: "$54 higher than last month", months: [
+  tag("Rev 29b card lead as a bubble (typed and voice alike): one short bot bubble above the card, the card has its own title and never repeats the sentence");
+  var h29 = bubble("That is a big jump, and I see why. Your bill is about $55 higher than last month.", "bot"); WGLTextStyle.emphasize(h29);
+  card("show_bill_trend_card", { display_text: "That is a big jump, and I see why. Your bill is about **$55 higher** than last month.", highlight_note: "$55 higher than last month", months: [
     { period: "Aug 2026", amount: 29.66 }, { period: "Sep 2026", amount: 27.39 }, { period: "Oct 2026", amount: 81.36, is_current: true } ],
     reasons: [
       { label: "Colder weather, more heating", amount: 41.01, direction: "up", icon: "flame" },
       { label: "Longer billing cycle (34 vs 28 days)", amount: 5.94, direction: "up", icon: "calendar" } ] });
-
-  tag("Rev 28 speech pilot extended: any card with display_text (voice mode lead, markdown link and bullets)");
-  card("show_rebate_card", { display_text: "Here is the best fit for you.\n- **$300** furnace rebate, apply by Dec 31\n- Amounts are published on [wgsmartsavings.com](https://www.wgsmartsavings.com)", _lead: true, rebates: [
-    { name: "High-efficiency furnace", amount: "$300", deadline: "Dec 31, 2026", status_note: "Published on wgsmartsavings.com", action_label: "Start claim", action_message: "Start my furnace rebate claim" } ] });
+  var p29 = bubble("Your balance is $83.32, due November 7, 2026. How would you like to pay?", "bot"); WGLTextStyle.emphasize(p29);
+  card("show_options_card", { display_text: "Your balance is **$83.32**, due **November 7, 2026**. How would you like to pay?", title: "Ways to pay", prompt: "Tap one to continue.", options: [
+    { id: "visa", label: "Visa ending 4521", benefit: "Your card on file", badge: "No card fee", icon: "card", highlight: true, action_message: "Pay with my Visa ending 4521" },
+    { id: "ach", label: "Checking account", benefit: "One-time eCheck or ACH payment", icon: "bank", action_message: "I would like to pay from my checking account" },
+    { id: "other", label: "Another amount", benefit: "Pay part of the balance", icon: "money", action_message: "I would like to pay a different amount" } ] });
 
   tag("Rev 29 chat text style (option A): bot text bubble in the card typeface, amounts and dates bold");
   var s29 = bubble("That is a big jump, and I see why. Your bill is about $55 higher than last month.", "bot"); s29.id = "sample-textstyle"; WGLTextStyle.emphasize(s29);

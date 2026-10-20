@@ -435,6 +435,15 @@
       '<div class="ht"><div class="title">' + esc(title) + "</div>" + (sub ? '<div class="sub">' + esc(sub) + "</div>" : "") + "</div></div>";
   }
   function empty(msg) { return '<p class="empty">' + esc(msg || "This information is not available right now.") + "</p>"; }
+  /* Rev 29b: the short bubble above a card (display_text) is the only place its sentence appears. A card heading, hint or note that
+     repeats a sentence of that bubble (three or more words, or the whole bubble) is replaced by the card's own default. */
+  function nrm(s) { return String(s === undefined || s === null ? "" : s).replace(/\*\*/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/^ +| +$/g, ""); }
+  function ttlOf(a, def) { return a.title && !dupOf(a.title, a.display_text) ? a.title : def; }
+  function dupOf(text, display) {
+    var n = nrm(text), d = nrm(display);
+    if (!n || !d) { return false; }
+    return n === d || (n.split(" ").length >= 3 && (" " + d + " ").indexOf(" " + n + " ") > -1);
+  }
 
   var ICON = {
     chart: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 20V10h4v10H4zm6 0V4h4v16h-4zm6 0v-7h4v7h-4z"/></svg>',
@@ -596,7 +605,7 @@
       return head("Your bill, month by month", "Amount billed each month", ICON.chart) +
         barChart({ values: ms.map(function (m) { return num(m.amount); }), labels: ms.map(function (m) { return m.period; }), cur: cur, fmt: money,
           aria: "Monthly bill amounts: " + ms.map(function (m) { return m.period + " " + money(m.amount); }).join(", ") }) +
-        (a.highlight_note ? '<p class="note"><span aria-hidden="true">&#9679;</span> ' + esc(a.highlight_note) + "</p>" : "") + reasons + follow;
+        (a.highlight_note && !dupOf(a.highlight_note, a.display_text) ? '<p class="note"><span aria-hidden="true">&#9679;</span> ' + esc(a.highlight_note) + "</p>" : "") + reasons + follow;
     },
     show_weather_usage_card: function (a) {
       var ms = arr(a.months, 13), unit = a.unit || "units";
@@ -660,7 +669,7 @@
         row("Date", a.date) + row("Confirmation", a.confirmation) + row("Paid with", a.method_last4 ? "Card ending " + a.method_last4 : "") + "</div>";
     },
     show_bill_summary_card: function (a) {
-      return head(a.title || "Bill summary", "", ICON.dollar) + '<div class="ramt left">' + esc(money(a.amount)) + "</div>" +
+      return head(ttlOf(a, "Bill summary"), "", ICON.dollar) + '<div class="ramt left">' + esc(money(a.amount)) + "</div>" +
         (a.convenience_fee ? row("Convenience fee", money(a.convenience_fee)) : "") + row("Due date", a.due_date) +
         row("Confirmation", a.confirmation_number) + row("Card", a.card_last4 ? "Ending " + a.card_last4 : "");
     },
@@ -717,20 +726,25 @@
     },
     /* Rev 23 chat-screen cards. Same payload rules as every card: all strings are escaped, missing fields are tolerated. */
     show_options_card: function (a) {
-      var os = arr(a.options, 4);
-      if (!os.length) { return head(a.title || "Your options", "", ICON.flame) + empty(); }
-      return head(a.title || "Your options", a.prompt || "Tap one to continue", ICON.flame) +
-        '<div class="optl" role="group" aria-label="' + esc(a.title || a.prompt || "Your options") + '" data-lock="1">' + os.map(function (o) {
+      var os = arr(a.options, 4), disp = a.display_text;
+      var ttl = a.title && !dupOf(a.title, disp) ? a.title : "Your options";
+      var hint = a.prompt && !dupOf(a.prompt, disp) ? a.prompt : "Tap one to continue";
+      /* a "no card fee" note under the rows repeats the badge or benefit of a row: drawn once, on the row */
+      var feeOnRow = os.some(function (o) { return o && /no (card )?(convenience )?fee/i.test((o.badge || "") + " " + (o.benefit || "")); });
+      var fn = a.footnote && !dupOf(a.footnote, disp) && !(disp !== undefined && feeOnRow && /no (card )?(convenience )?fee/i.test(a.footnote)) ? a.footnote : "";
+      if (!os.length) { return head(ttl, "", ICON.flame) + empty(); }
+      return head(ttl, hint, ICON.flame) +
+        '<div class="optl" role="group" aria-label="' + esc(ttl) + '" data-lock="1">' + os.map(function (o) {
           var msg = o.action_message || o.label || "";
           return '<button type="button" class="opt' + (o.highlight ? " hl" : "") + '" data-send="' + esc(msg) + '">' +
             '<span class="ico" aria-hidden="true">' + oicon(o.icon) + "</span>" +
             '<span class="ot"><span class="ol">' + esc(o.label) + "</span>" + (o.benefit ? '<span class="ob">' + esc(o.benefit) + "</span>" : "") + "</span>" +
             (o.badge ? '<span class="bd">' + esc(o.badge) + "</span>" : "") + '<span class="go" aria-hidden="true">&#8250;</span></button>';
-        }).join("") + "</div>" + (a.footnote ? '<p class="fn">' + esc(a.footnote) + "</p>" : "");
+        }).join("") + "</div>" + (fn ? '<p class="fn">' + esc(fn) + "</p>" : "");
     },
     show_compare_table_card: function (a) {
       var cols = arr(a.columns, 4), rows = arr(a.rows, 6);
-      if (!cols.length || !rows.length) { return head(a.title || "Compare", "", ICON.chart) + empty(); }
+      if (!cols.length || !rows.length) { return head(ttlOf(a, "Compare"), "", ICON.chart) + empty(); }
       var hc = typeof a.highlight_column === "number" && a.highlight_column >= 0 && a.highlight_column < cols.length ? Math.floor(a.highlight_column) : -1;
       var th = cols.map(function (c, i) {
         return '<th scope="col"' + (i === hc ? ' class="hl"' : "") + ">" + (i === hc && a.highlight_label ? '<span class="hb">' + esc(a.highlight_label) + "</span>" : "") + esc(c) + "</th>";
@@ -740,17 +754,17 @@
         return '<tr><th scope="row">' + esc(r.label) + (r.note ? '<span class="nt">' + esc(r.note) + "</span>" : "") + "</th>" +
           cols.map(function (_, i) { return "<td" + (i === hc ? ' class="hl"' : "") + ">" + esc(cells[i] === undefined || cells[i] === null ? "" : cells[i]) + "</td>"; }).join("") + "</tr>";
       }).join("");
-      return head(a.title || "Compare", "", ICON.chart) +
-        '<div class="cmpw" role="region" tabindex="0" aria-label="' + esc(a.title || "Comparison") + '"><table class="cmp"><caption class="sr">' + esc(a.title || "Comparison") + "</caption>" +
+      return head(ttlOf(a, "Compare"), "", ICON.chart) +
+        '<div class="cmpw" role="region" tabindex="0" aria-label="' + esc(ttlOf(a, "Comparison")) + '"><table class="cmp"><caption class="sr">' + esc(ttlOf(a, "Comparison")) + "</caption>" +
         '<thead><tr><th scope="col"><span class="sr">Option</span></th>' + th + "</tr></thead><tbody>" + body + "</tbody></table></div>" +
         (a.caption ? '<p class="fn">' + esc(a.caption) + "</p>" : "") +
         (a.action_label && a.action_message ? '<div class="cact">' + actionBtn(a.action_label, a.action_message, "") + "</div>" : "");
     },
     show_checklist_card: function (a) {
       var its = arr(a.items, 6);
-      if (!its.length) { return head(a.title || "Good to know", "", ICON.check) + empty(); }
+      if (!its.length) { return head(ttlOf(a, "Good to know"), "", ICON.check) + empty(); }
       var steps = a.style === "steps", tag = steps ? "ol" : "ul";
-      return head(a.title || "Good to know", "", ICON.check) + "<" + tag + ' class="cl">' + its.map(function (it, i) {
+      return head(ttlOf(a, "Good to know"), "", ICON.check) + "<" + tag + ' class="cl">' + its.map(function (it, i) {
         return "<li>" + (steps ? '<span class="dot" aria-hidden="true">' + (i + 1) + "</span>" : '<span class="ico" aria-hidden="true">' + oicon(it.icon) + "</span>") +
           '<span class="ct">' + esc(it.text) + (it.detail ? '<span class="cd">' + esc(it.detail) + "</span>" : "") + "</span></li>";
       }).join("") + "</" + tag + ">" + (a.footnote ? '<p class="fn">' + esc(a.footnote) + "</p>" : "") +
@@ -867,40 +881,18 @@
     ".rsn .rico{flex:none;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--pale);border:1px solid #c0ecff;color:var(--navy)}.rsn .rico svg{width:16px;height:16px}" +
     ".rsn .rl{flex:1;min-width:0}.rsn .ra{flex:none;font-variant-numeric:tabular-nums;color:#7a3e00}.rsn .ra.dn{color:#1d5b33}" +
     ".wstats{flex-wrap:wrap}.wstats>div{flex:1 1 40%;min-width:0}" +
-    ".dlead{margin:0 0 10px;font-size:14.5px;line-height:1.4;font-weight:600;color:var(--navy)}" +
-    ".dbul{margin:0 0 10px;padding-left:20px;font-size:14px;line-height:1.4;color:var(--navy)}.dbul li{margin:2px 0}.dlead a,.dbul a{color:var(--blue,#0072bc)}" +
     "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.line{stroke-dasharray:none}}";
 
   /* Bare cards (no outer frame): they draw their own frame */
   var BARE = { show_insights_carousel: 1, show_payment_receipt_card: 1, show_appointment_confirmation: 1, show_emergency_card: 1, show_quick_actions: 1, show_welcome_chips: 1 };
 
-  /* The short on-screen line of a reply (display_text) as the first block of a card, voice mode only (_lead). Plain text becomes one
-     paragraph; lines that start with "- " become a list; **bold** and [label](https://link) are supported. Everything is escaped. */
-  function leadInline(t) {
-    return esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  }
-  function leadHTML(a) {
-    if (!a || typeof a !== "object" || !a._lead || typeof a.display_text !== "string" || !a.display_text) { return ""; }
-    var out = "", list = [];
-    function flush() { if (list.length) { out += '<ul class="dbul">' + list.join("") + "</ul>"; list = []; } }
-    a.display_text.split(/\r?\n/).forEach(function (line) {
-      var t = line.replace(/^\s+|\s+$/g, "");
-      if (!t) { flush(); return; }
-      var m = /^(?:-|\u2022)\s+(.*)$/.exec(t);
-      if (m) { list.push("<li>" + leadInline(m[1]) + "</li>"); } else { flush(); out += '<p class="dlead">' + leadInline(t) + "</p>"; }
-    });
-    flush();
-    return out;
-  }
   function buildCardHTML(tool, args) {
     var fn = CARDS[tool];
     if (!fn) { return ""; }
     var inner;
     try { inner = fn(args && typeof args === "object" ? args : {}); }
     catch (e) { inner = empty(); }
-    /* Rev 28: in voice mode the page hides the long spoken text and sets _lead, so the short display_text leads every card */
-    try { inner = leadHTML(args) + inner; } catch (e2) { /* no lead */ }
+    /* Rev 29b: a card never draws display_text itself; it is the bot bubble above the card (typed and voice alike) */
     return "<style>" + CARD_CSS + '</style><div class="card' + (BARE[tool] ? " bare" : "") + '">' + inner + "</div>";
   }
 
@@ -1089,12 +1081,13 @@
       }
     }
   }
-  /* ---- Rev 27 speech pilot (high bill explanation only) -------------------------------------------------------------
-     The agent's text part of that reply is the full spoken explanation (the voice reads it aloud); the trend card payload
-     carries display_text, the short line shown on screen. Typed chat: the long text message of the reply is replaced by
-     display_text. Voice (bidi) mode: the widget plays the backend audio and shows the transcript as a bot bubble; the
-     page hides that long bubble once the card with display_text arrives and shows display_text as the lead of the card.
-     Audio is never touched. Without display_text, or if anything throws, the text stays visible. */
+  /* ---- Rev 27/28/29b speech: the short bubble above every card ------------------------------------------------------
+     The agent's text part of a card reply is the full spoken explanation (the voice reads it aloud); the card payload carries
+     display_text, the one or two short sentences shown on screen. Typed chat: the long text message of the reply is replaced by
+     display_text (a normal bot bubble above the card). Voice (bidi) mode: the widget plays the backend audio and shows the transcript
+     as a bot bubble; the page hides that long bubble once the card with display_text arrives and puts display_text in front of the
+     card as an ordinary bot bubble. A card never draws display_text itself. Audio is never touched. Without display_text, or if
+     anything throws or the bubble is not found, the long text stays visible. */
   function cardFieldsOf(el) {
     if (!el || typeof el !== "object") { return null; }
     var p = el.payload && typeof el.payload === "object" ? el.payload : el;
@@ -1196,21 +1189,50 @@
       });
     });
   }
-  function markLead(msgs) {
-    msgs.forEach(function (m) {
-      var list = m && Array.isArray(m.richElements) ? m.richElements : [m];
-      list.forEach(function (el) {
-        var p = cardFieldsOf(el);
-        if (p && typeof p.display_text === "string" && p.display_text) { p._lead = true; }
-      });
-    });
-  }
   function textOf(msgs) {
     return msgs.filter(function (m) { return m && m.type === "text" && typeof m.text === "string"; }).map(function (m) { return m.text; }).join(" ").replace(/^\s+|\s+$/g, "");
   }
   /* The long spoken text is longer than the lead; the idle prompt of the voice mode and the lead itself are never hidden. */
   function isLongText(t, lead) {
     return !!t && t !== lead && t.length > lead.length && !/still here|take your time/i.test(t);
+  }
+  /* Rev 29b: the short display_text is a normal bot bubble ABOVE the card, typed and voice alike. Typed: applyDisplayText already put it
+     in the reply. Voice (bidi): the card arrives as its own utterance after the long spoken text, so the page inserts a text message
+     with display_text in front of the card in that same utterance (the SDK draws it as an ordinary bot bubble) and hides the long
+     text bubble. Nothing is ever drawn inside the card. If the bubble cannot be found on screen shortly afterwards, the long text
+     is shown again (the fallback of the pilot: the customer always sees an answer). */
+  function plainText(t) { return String(t || "").replace(/\*\*/g, "").replace(/\s+/g, " ").replace(/^ | $/g, ""); }
+  function deepText(rootNode) {
+    var out = "";
+    (function walk(r) {
+      var kids = r.childNodes || [];
+      for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        if (k.nodeType === 3) { out += k.nodeValue; }
+        else if (k.nodeType === 1) { if (k.shadowRoot) { walk(k.shadowRoot); } walk(k); }
+      }
+    })(rootNode);
+    return out.replace(/\s+/g, " ");
+  }
+  function showUtterance(id) {
+    delete voice.hidden[id];
+    var e = utterEl(id);
+    if (e) { e.style.display = ""; e.removeAttribute("data-wgl-hidden"); }
+  }
+  function verifyLead(cardId, lead, hiddenIds, tries) {
+    var e = utterEl(cardId);
+    var want = plainText(lead);
+    if (e && plainText(deepText(e.shadowRoot || e)).indexOf(want) > -1) { return; }
+    if ((tries || 0) < 12) { setTimeout(function () { verifyLead(cardId, lead, hiddenIds, (tries || 0) + 1); }, 150); return; }
+    console.warn("[wgl] the lead bubble did not appear; the long text is shown again");
+    hiddenIds.forEach(showUtterance);
+  }
+  function insertLeadBubble(messages, lead) {
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m && m.type === "customCard") { messages.splice(i, 0, { type: "text", text: lead, _wglLead: true }); return true; }
+    }
+    return false;
   }
   function voiceAdd(utts) {
     if (!Array.isArray(utts)) { return; }
@@ -1220,12 +1242,16 @@
       fixRich(u.messages);
       var lead = leadOf(u.messages);
       if (lead) {
-        /* typed sequence: the short lead is already on screen as the bot text, so the card must not draw it a second time */
-        var typed = voice.texts.some(function (t) { return t.text === lead; });
+        /* typed sequence: the lead is already on screen as the bot text (a text message of the same utterance, or the text utterance
+           just before the card), so nothing is added and nothing is hidden */
+        var typed = u.messages.some(function (m) { return m && m.type === "text" && m.text === lead; }) ||
+          voice.texts.some(function (t) { return t.text === lead; });
         if (!typed) {
           voice.lead = lead;
-          markLead(u.messages);
-          voice.texts.forEach(function (t) { if (isLongText(t.text, lead)) { hideUtterance(t.id, 0); } });
+          var hiddenIds = [];
+          voice.texts.forEach(function (t) { if (isLongText(t.text, lead)) { hideUtterance(t.id, 0); hiddenIds.push(t.id); } });
+          if (insertLeadBubble(u.messages, lead) && u.utteranceId) { setTimeout(function () { verifyLead(u.utteranceId, lead, hiddenIds, 0); }, 200); }
+          else { hiddenIds.forEach(showUtterance); }   /* no way to draw the lead: the long text stays */
         }
         voice.texts = [];
         return;
@@ -1381,13 +1407,15 @@
     tsRoot(root);
     for (var i = 0; i < all.length; i++) {
       var e = all[i];
-      if (e.shadowRoot && !/^wgl-/.test(e.localName)) { tsWalk(e.shadowRoot); }   /* the cards (wgl-*) are never entered */
+      if (e.shadowRoot && !/^(wgl|cx)-/.test(e.localName)) { tsWalk(e.shadowRoot); }   /* the cards (wgl-*, cx-*) are never entered */
     }
   }
   function tsScan() {
     try {
       var el = chatEl();
-      if (el && el.shadowRoot) { tsWalk(el.shadowRoot); }
+      /* the embed puts <chat-messenger-chat-bubble> in the LIGHT DOM of <chat-messenger> (its utterances live in the bubble's shadow
+         tree), so the walk starts at the element itself and also enters its own shadow root when it has one */
+      if (el) { tsWalk(el); if (el.shadowRoot) { tsWalk(el.shadowRoot); } }
     } catch (err) { /* cosmetic only */ }
   }
   function tsSchedule() {
@@ -1450,7 +1478,7 @@
 
   /* Used by widget-preview.html and handy in the console: WGLCards.create("show_bill_trend_card", {...}) */
   /* Test hooks of the Rev 27 speech pilot (pure functions and the voice consumer). */
-  window.WGLSpeech = { leadOf: leadOf, applyDisplayText: applyDisplayText, normalize: normalizeMessages, consumer: voiceConsumer, state: voice, start: voiceStart, stop: voiceStop };
+  window.WGLSpeech = { dupOf: dupOf, insertLeadBubble: insertLeadBubble, leadOf: leadOf, applyDisplayText: applyDisplayText, normalize: normalizeMessages, consumer: voiceConsumer, state: voice, start: voiceStart, stop: voiceStop };
   window.WGLTextStyle = { emphasize: tsEmphasize, scan: tsScan, css: TS_CSS, root: tsRoot };
   window.WGLCards = {
     tools: WGL_TOOLS,
