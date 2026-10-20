@@ -1128,10 +1128,13 @@
     return true;
   }
 
-  var voice = { on: false, texts: [], hidden: {}, lead: "", registered: false };
+  /* The consumer does not depend on the connect/disconnect-bidi events (the real flow may attach after connect): it follows the
+     utterances themselves. texts = the bot text utterances since the last customer utterance; card = the last card with display_text. */
+  var voice = { on: false, texts: [], hidden: {}, lead: "", card: null, registered: false };
+  function dbg() { if (window.console && console.debug) { console.debug.apply(console, ["[wgl]"].concat([].slice.call(arguments))); } }
   var voiceConsumer = {
     consumerId: "wgl-speech-pilot",
-    clearMessages: function () { voice.texts = []; voice.hidden = {}; voice.lead = ""; },
+    clearMessages: function () { voice.texts = []; voice.hidden = {}; voice.lead = ""; voice.card = null; },
     addMessages: function (utts) { try { voiceAdd(utts); } catch (err) { console.warn("[wgl] speech pilot add failed (text stays visible):", err); } return Promise.resolve(); },
     updateMessages: function (utts) { try { voiceUpdate(utts); } catch (err) { /* text stays visible */ } return Promise.resolve(); },
     removeMessage: function () {},
@@ -1175,47 +1178,84 @@
       });
     });
   }
-  function markLead(msgs) {
-    msgs.forEach(function (m) {
+  function leadPayload(msgs) {
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
       var list = m && Array.isArray(m.richElements) ? m.richElements : [m];
-      list.forEach(function (el) {
-        var p = cardFieldsOf(el);
-        if (p && typeof p.display_text === "string" && p.display_text) { p._lead = true; }
-      });
-    });
+      for (var j = 0; j < list.length; j++) {
+        var p = m && m.type !== "text" ? cardFieldsOf(list[j]) : null;
+        if (p && typeof p.display_text === "string" && p.display_text) { return p; }
+      }
+    }
+    return null;
   }
+  function textOf(u) {
+    return (u.messages || []).filter(function (m) { return m && m.type === "text" && typeof m.text === "string"; }).map(function (m) { return m.text; }).join(" ").replace(/^\s+|\s+$/g, "");
+  }
+  /* Make the card draw display_text as its first line (the card element re-renders when its payload is set again). */
+  function showLeadInCard(card, tries) {
+    if (!card) { return; }
+    card.payload._lead = true;
+    var host = utterEl(card.id), done = false;
+    if (host && host.shadowRoot) {
+      host.shadowRoot.querySelectorAll("*").forEach(function (n) {
+        if (!done && /^cx-/.test(n.localName) && "dfPayload" in n) { n.dfPayload = card.payload; done = true; }
+      });
+    }
+    dbg("lead shown in the card", card.id, done);
+    if (!done && (tries || 0) < 10) { setTimeout(function () { showLeadInCard(card, (tries || 0) + 1); }, 80); }
+  }
+  function isLongText(t) { return t.length > voice.lead.length && t !== voice.lead; }
   function voiceAdd(utts) {
-    if (!voice.on || !Array.isArray(utts)) { return; }
+    if (!Array.isArray(utts)) { return; }
     utts.forEach(function (u) {
       if (!u || !Array.isArray(u.messages)) { return; }
-      if (!u.isBot) { voice.texts = []; voice.lead = ""; return; }   /* a new customer turn starts a new reply */
+      if (!u.isBot) { voice.texts = []; voice.lead = ""; voice.card = null; dbg("customer turn, reply state reset"); return; }
       fixRich(u.messages);
       var lead = leadOf(u.messages);
       if (lead) {
+        var payload = leadPayload(u.messages);
         voice.lead = lead;
-        markLead(u.messages);
-        voice.texts.forEach(function (id) { hideUtterance(id, 0); });
+        voice.card = { id: u.utteranceId, payload: payload };
+        var hid = 0;
+        voice.texts.forEach(function (t) { if (t.text !== lead) { hideUtterance(t.id, 0); hid++; } });
         voice.texts = [];
+        if (hid && payload) { payload._lead = true; }   /* set before the SDK draws the card */
+        dbg("card with display_text; hid", hid, "text bubble(s)");
         return;
       }
-      var isText = u.messages.some(function (m) { return m && m.type === "text"; });
-      if (!isText || !u.utteranceId) { return; }
-      if (voice.lead) { hideUtterance(u.utteranceId, 0); }   /* the text arrived after the card of the same reply */
-      else if (voice.texts.indexOf(u.utteranceId) < 0) { voice.texts.push(u.utteranceId); }
+      var t = textOf(u);
+      if (!t || !u.utteranceId) { return; }
+      if (voice.lead) {
+        if (isLongText(t)) {   /* the long text arrived after the card of the same reply; short nudges such as the idle prompt stay */
+          hideUtterance(u.utteranceId, 0);
+          if (voice.card && !voice.card.payload._lead) { showLeadInCard(voice.card, 0); }
+          dbg("hid a text that arrived after the card", u.utteranceId);
+        }
+      } else if (!voice.texts.some(function (x) { return x.id === u.utteranceId; })) {
+        voice.texts.push({ id: u.utteranceId, text: t });
+      }
     });
   }
   function voiceUpdate(utts) {
-    if (!voice.on || !Array.isArray(utts)) { return; }
-    utts.forEach(function (u) { if (u && u.utteranceId && voice.hidden[u.utteranceId]) { hideUtterance(u.utteranceId, 0); } });
+    if (!Array.isArray(utts)) { return; }
+    utts.forEach(function (u) {
+      if (!u || !u.utteranceId || !u.isBot) { return; }
+      if (voice.hidden[u.utteranceId]) { hideUtterance(u.utteranceId, 0); return; }
+      var t = textOf(u);
+      var known = voice.texts.filter(function (x) { return x.id === u.utteranceId; })[0];
+      if (known) { known.text = t; }
+      else if (voice.lead && t && isLongText(t) && !leadOf(u.messages)) { voiceAdd([u]); }
+    });
   }
   function voiceStart() {
     var el = chatEl();
     if (el && typeof el.registerMessageConsumer === "function" && !voice.registered) {
-      try { el.registerMessageConsumer(voiceConsumer); voice.registered = true; } catch (err) { console.warn("[wgl] speech pilot consumer failed:", err); }
+      try { el.registerMessageConsumer(voiceConsumer); voice.registered = true; dbg("speech consumer registered"); } catch (err) { console.warn("[wgl] speech pilot consumer failed:", err); }
     }
     voice.on = true;
   }
-  function voiceStop() { voice.on = false; voice.texts = []; voice.lead = ""; }
+  function voiceStop() { voice.on = false; }
 
   function onResponse(e) {
     try { normalizeMessages(e && e.detail && e.detail.messages); }
@@ -1290,6 +1330,7 @@
     if (!welcomeDone && !welcomeShown() && isChatOpen()) { showWelcome(0); }
     applyVariables();
     registerTools();
+    voiceStart();   /* the speech consumer is always on; it never needs the bidi events */
   }
 
   /* ---------------------------------------------------------------- init */
