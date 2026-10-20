@@ -169,6 +169,8 @@
   card("show_rebate_card", { display_text: "Here is the best fit for you.\n- **$300** furnace rebate, apply by Dec 31\n- Amounts are published on [wgsmartsavings.com](https://www.wgsmartsavings.com)", _lead: true, rebates: [
     { name: "High-efficiency furnace", amount: "$300", deadline: "Dec 31, 2026", status_note: "Published on wgsmartsavings.com", action_label: "Start claim", action_message: "Start my furnace rebate claim" } ] });
 
+  tag("Rev 29 chat text style (option A): bot text bubble in the card typeface, amounts and dates bold");
+  var s29 = bubble("That is a big jump, and I see why. Your bill is about $55 higher than last month.", "bot"); s29.id = "sample-textstyle"; WGLTextStyle.emphasize(s29);
   var t = document.createElement("div"); t.className = "typing"; t.setAttribute("aria-label", "Assistant is typing");
   t.innerHTML = "<i></i><i></i><i></i>"; tag("typing indicator (reference)"); box.appendChild(t);
 

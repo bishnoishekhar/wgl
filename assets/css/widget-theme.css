@@ -80,6 +80,9 @@ chat-messenger {
   --chat-messenger-internal-message-bot-border: 1px solid #c0ecff;
   --chat-messenger-internal-message-border-radius: 16px;
   --chat-messenger-internal-message-bot-border-top-left-radius: 2px;
+  /* Rev 29 (option A): bot bubble text weight; the size and line height are set by assistant.js because the SDK variables are shared with the customer bubble */
+  --chat-messenger-internal-message-bot-font-weight: 400;
+  --chat-messenger-internal-message-bot-strong-font-weight: 700;
   --chat-messenger-internal-message-user-border-top-right-radius: 2px;
 
   /* ---- Input box + send button ---- */

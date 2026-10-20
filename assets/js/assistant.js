@@ -1323,12 +1323,94 @@
     }
   }
 
+  /* ---- Rev 29 chat text style (option A, "match the card text"): the bot text bubbles use the card typeface (Figtree),
+     14.5px, line height 1.5, weight 400, and dollar amounts and dates inside them are bold. Page-only and cosmetic:
+     the SDK has no bot-only size or line-height variable (the size variable is shared with the customer bubble), so a small
+     stylesheet is added to the open shadow roots that hold a .bot-message bubble. Cards, chips, charts, customer bubbles,
+     links and inputs are never touched; anything that throws leaves the text as it is. ---- */
+  var TS_CSS = ".message.bot-message.bot-message{font-family:var(--chat-messenger-font-family,\"Figtree\",system-ui,sans-serif);font-size:14.5px;line-height:1.5;font-weight:400}" +
+    ".message.bot-message.bot-message strong,.message.bot-message.bot-message b{font-weight:700}";
+  var TS_AMOUNT = /\$\d[\d,]*(?:\.\d+)?|\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.? \d{1,2}(?!\d)(?:st|nd|rd|th)?(?:, \d{4})?/g;
+  var TS_SKIP = "strong,b,a,code,pre,input,textarea,button,select,h1,h2,h3,h4,h5,h6,[data-wgl-key]";
+  var ts = { observed: [], timer: 0, scanTimer: 0 };
+  function tsEmphasize(el) {
+    try {
+      var walker = doc.createTreeWalker(el, 4 /* NodeFilter.SHOW_TEXT */, null);
+      var nodes = [], n;
+      while ((n = walker.nextNode())) { nodes.push(n); }
+      nodes.forEach(function (t) {
+        var parent = t.parentElement;
+        if (!parent || (parent.closest && parent.closest(TS_SKIP))) { return; }
+        var text = t.nodeValue;
+        TS_AMOUNT.lastIndex = 0;
+        if (!text || !TS_AMOUNT.test(text)) { return; }
+        TS_AMOUNT.lastIndex = 0;
+        var frag = doc.createDocumentFragment(), last = 0, m;
+        while ((m = TS_AMOUNT.exec(text))) {
+          if (m.index > last) { frag.appendChild(doc.createTextNode(text.slice(last, m.index))); }
+          var st = doc.createElement("strong");
+          st.setAttribute("data-wgl-key", "1");
+          st.textContent = m[0];
+          frag.appendChild(st);
+          last = m.index + m[0].length;
+        }
+        if (last < text.length) { frag.appendChild(doc.createTextNode(text.slice(last))); }
+        parent.replaceChild(frag, t);
+      });
+    } catch (err) { /* leave the text alone */ }
+  }
+  function tsRoot(root) {
+    try {
+      var bubbles = root.querySelectorAll(".message.bot-message");
+      if (!bubbles.length) { return; }
+      if (!root.querySelector("style[data-wgl-text-style]")) {
+        var st = doc.createElement("style");
+        st.setAttribute("data-wgl-text-style", "1");
+        st.textContent = TS_CSS;
+        root.appendChild(st);
+      }
+      for (var i = 0; i < bubbles.length; i++) { tsEmphasize(bubbles[i]); }
+    } catch (err) { /* cosmetic only */ }
+  }
+  function tsWalk(root) {
+    var all = root.querySelectorAll("*");
+    if (ts.observed.indexOf(root) < 0 && window.MutationObserver) {
+      ts.observed.push(root);
+      new MutationObserver(tsSchedule).observe(root, { childList: true, subtree: true, characterData: true });
+    }
+    tsRoot(root);
+    for (var i = 0; i < all.length; i++) {
+      var e = all[i];
+      if (e.shadowRoot && !/^wgl-/.test(e.localName)) { tsWalk(e.shadowRoot); }   /* the cards (wgl-*) are never entered */
+    }
+  }
+  function tsScan() {
+    try {
+      var el = chatEl();
+      if (el && el.shadowRoot) { tsWalk(el.shadowRoot); }
+    } catch (err) { /* cosmetic only */ }
+  }
+  function tsSchedule() {
+    if (ts.scanTimer) { return; }
+    ts.scanTimer = setTimeout(function () { ts.scanTimer = 0; tsScan(); }, 60);
+  }
+  function textStyleStart() {
+    if (PREVIEW || ts.timer) { return; }
+    var n = 0;
+    ts.timer = setInterval(function () {
+      tsScan();
+      if (++n > 120) { clearInterval(ts.timer); }   /* the observers take over once the shadow roots exist */
+    }, 500);
+    tsScan();
+  }
+
   function wireSdk() {
     watchResetButton();
     if (!welcomeDone && !welcomeShown() && isChatOpen()) { showWelcome(0); }
     applyVariables();
     registerTools();
     registerVoice();
+    textStyleStart();
   }
 
   /* ---------------------------------------------------------------- init */
@@ -1369,6 +1451,7 @@
   /* Used by widget-preview.html and handy in the console: WGLCards.create("show_bill_trend_card", {...}) */
   /* Test hooks of the Rev 27 speech pilot (pure functions and the voice consumer). */
   window.WGLSpeech = { leadOf: leadOf, applyDisplayText: applyDisplayText, normalize: normalizeMessages, consumer: voiceConsumer, state: voice, start: voiceStart, stop: voiceStop };
+  window.WGLTextStyle = { emphasize: tsEmphasize, scan: tsScan, css: TS_CSS, root: tsRoot };
   window.WGLCards = {
     tools: WGL_TOOLS,
     welcome: WELCOME,
