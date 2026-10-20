@@ -165,6 +165,10 @@
       { label: "Colder weather, more heating", amount: 41.01, direction: "up", icon: "flame" },
       { label: "Longer billing cycle (34 vs 28 days)", amount: 5.94, direction: "up", icon: "calendar" } ] });
 
+  tag("Rev 28 speech pilot extended: any card with display_text (voice mode lead, markdown link and bullets)");
+  card("show_rebate_card", { display_text: "Here is the best fit for you.\n- **$300** furnace rebate, apply by Dec 31\n- Amounts are published on [wgsmartsavings.com](https://www.wgsmartsavings.com)", _lead: true, rebates: [
+    { name: "High-efficiency furnace", amount: "$300", deadline: "Dec 31, 2026", status_note: "Published on wgsmartsavings.com", action_label: "Start claim", action_message: "Start my furnace rebate claim" } ] });
+
   var t = document.createElement("div"); t.className = "typing"; t.setAttribute("aria-label", "Assistant is typing");
   t.innerHTML = "<i></i><i></i><i></i>"; tag("typing indicator (reference)"); box.appendChild(t);
 
