@@ -593,7 +593,9 @@
           return '<li><span class="rico" aria-hidden="true">' + oicon(r.icon) + '</span><span class="rl">' + esc(r.label) + "</span>" +
             (amt ? '<b class="ra' + (up ? " up" : down ? " dn" : "") + '">' + esc(amt) + "</b>" : "") + "</li>";
         }).join("") + "</ul>" : "";
-      return head("Your bill, month by month", "Amount billed each month", ICON.chart) +
+      /* Rev 27 speech pilot: in voice mode the page hides the long spoken text and sets _lead, so the short display_text leads the card */
+      var lead = a._lead && typeof a.display_text === "string" && a.display_text ? '<p class="dlead">' + esc(a.display_text) + "</p>" : "";
+      return lead + head("Your bill, month by month", "Amount billed each month", ICON.chart) +
         barChart({ values: ms.map(function (m) { return num(m.amount); }), labels: ms.map(function (m) { return m.period; }), cur: cur, fmt: money,
           aria: "Monthly bill amounts: " + ms.map(function (m) { return m.period + " " + money(m.amount); }).join(", ") }) +
         (a.highlight_note ? '<p class="note"><span aria-hidden="true">&#9679;</span> ' + esc(a.highlight_note) + "</p>" : "") + reasons + follow;
@@ -867,6 +869,7 @@
     ".rsn .rico{flex:none;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--pale);border:1px solid #c0ecff;color:var(--navy)}.rsn .rico svg{width:16px;height:16px}" +
     ".rsn .rl{flex:1;min-width:0}.rsn .ra{flex:none;font-variant-numeric:tabular-nums;color:#7a3e00}.rsn .ra.dn{color:#1d5b33}" +
     ".wstats{flex-wrap:wrap}.wstats>div{flex:1 1 40%;min-width:0}" +
+    ".dlead{margin:0 0 10px;font-size:14.5px;line-height:1.4;font-weight:600;color:var(--navy)}" +
     "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.line{stroke-dasharray:none}}";
 
   /* Bare cards (no outer frame): they draw their own frame */
@@ -1041,6 +1044,7 @@
       var out = [];
       list.forEach(function (el) {
         if (!el || typeof el !== "object") { return; }
+        if (!el.type && typeof el.name === "string" && /^cx-/.test(el.name)) { el.type = "custom_template"; }   /* flat {name, payload} from a bidi payload */
         if (SDK_TYPES[el.type] && !(el.type === "custom_template" && !(window.customElements && customElements.get(el.name)))) { out.push(el); return; }
         var tag = el.type === "custom_template" ? "" : cardTagFor(el.type);
         if (tag) {
@@ -1065,9 +1069,159 @@
       }
     }
   }
+  /* ---- Rev 27 speech pilot (high bill explanation only) -------------------------------------------------------------
+     The agent's text part of that reply is the full spoken explanation (the voice reads it aloud); the trend card payload
+     carries display_text, the short line shown on screen. Typed chat: the long text message of the reply is replaced by
+     display_text. Voice (bidi) mode: the widget plays the backend audio and shows the transcript as a bot bubble; the
+     page hides that long bubble once the card with display_text arrives and shows display_text as the lead of the card.
+     Audio is never touched. Without display_text, or if anything throws, the text stays visible. */
+  function cardFieldsOf(el) {
+    if (!el || typeof el !== "object") { return null; }
+    var p = el.payload && typeof el.payload === "object" ? el.payload : el;
+    if (p && p.args && typeof p.args === "object" && typeof p.display_text !== "string") { p = p.args; }
+    return p && typeof p === "object" ? p : null;
+  }
+  function displayTextOf(el) {
+    var p = cardFieldsOf(el);
+    var d = p && p.display_text;
+    return typeof d === "string" ? d.replace(/^\s+|\s+$/g, "") : "";
+  }
+  /* The display_text of a reply: from a flat card message or from the rich elements of a customCard message. */
+  function leadOf(msgs) {
+    if (!Array.isArray(msgs)) { return ""; }
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (!m || typeof m !== "object" || m.type === "text") { continue; }
+      var d = displayTextOf(m);
+      if (!d && Array.isArray(m.richElements)) {
+        for (var j = 0; j < m.richElements.length && !d; j++) { d = displayTextOf(m.richElements[j]); }
+      }
+      if (d) { return d; }
+    }
+    return "";
+  }
+  function isCardMessage(m) { return !!m && typeof m === "object" && m.type !== "text" && m.type !== "chips"; }
+  /* Typed path: runs on the messages array of chat-messenger-response-received, after normalizeMessages. */
+  function applyDisplayText(msgs) {
+    var lead = leadOf(msgs);
+    if (!lead) { return false; }
+    var first = -1, firstCard = -1;
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (first < 0 && m && m.type === "text") { first = i; }
+      if (firstCard < 0 && isCardMessage(m)) { firstCard = i; }
+    }
+    if (first >= 0 && msgs[first]._wglLead) { return false; }   /* already applied */
+    for (var k = msgs.length - 1; k >= 0; k--) {
+      if (msgs[k] && msgs[k].type === "text" && k !== first) {
+        msgs.splice(k, 1);
+        if (k < first) { first--; }
+        if (k < firstCard) { firstCard--; }
+      }
+    }
+    if (first >= 0) {
+      msgs[first].text = lead;
+      msgs[first]._wglLead = true;
+    } else {
+      msgs.splice(Math.max(firstCard, 0), 0, { type: "text", text: lead, _wglLead: true });
+    }
+    return true;
+  }
+
+  var voice = { on: false, texts: [], hidden: {}, lead: "", registered: false };
+  var voiceConsumer = {
+    consumerId: "wgl-speech-pilot",
+    clearMessages: function () { voice.texts = []; voice.hidden = {}; voice.lead = ""; },
+    addMessages: function (utts) { try { voiceAdd(utts); } catch (err) { console.warn("[wgl] speech pilot add failed (text stays visible):", err); } return Promise.resolve(); },
+    updateMessages: function (utts) { try { voiceUpdate(utts); } catch (err) { /* text stays visible */ } return Promise.resolve(); },
+    removeMessage: function () {},
+    removeLastMessage: function () {}
+  };
+  function utterEl(id) {
+    var found = null;
+    function walk(rootNode) {
+      var all = rootNode.querySelectorAll("*");
+      for (var i = 0; i < all.length && !found; i++) {
+        var e = all[i];
+        if (e.localName === "chat-messenger-utterance" && ((e.utterance && e.utterance.utteranceId) === id || e.utteranceId === id)) { found = e; return; }
+        if (e.shadowRoot) { walk(e.shadowRoot); }
+      }
+    }
+    walk(doc);   /* the utterances live in the shadow roots below the chat-messenger element and its container */
+    return found;
+  }
+  function hideUtterance(id, tries) {
+    if (!id) { return; }
+    voice.hidden[id] = true;
+    var e = utterEl(id);
+    if (e) { e.style.display = "none"; e.setAttribute("data-wgl-hidden", "speech"); return; }
+    if ((tries || 0) < 30) { setTimeout(function () { hideUtterance(id, (tries || 0) + 1); }, 60); }
+  }
+  /* A bidi payload can arrive in a shape the SDK cannot draw; convert the known card shapes in place, as the typed path does. */
+  function fixRich(msgs) {
+    msgs.forEach(function (m) {
+      if (!m || m.type !== "customCard" || !Array.isArray(m.richElements)) { return; }
+      m.richElements.forEach(function (el) {
+        if (!el || typeof el !== "object") { return; }
+        if (!el.type && typeof el.name === "string" && /^cx-/.test(el.name)) { el.type = "custom_template"; return; }
+        if (!SDK_TYPES[el.type]) {
+          var tag = cardTagFor(el.type);
+          if (!tag) { return; }
+          var fields = {};
+          Object.keys(el).forEach(function (k) { if (k !== "type" && k !== "id" && k !== "name") { fields[k] = el[k]; } });
+          Object.keys(el).forEach(function (k) { delete el[k]; });
+          el.type = "custom_template"; el.name = tag; el.id = "wgl-" + Date.now(); el.payload = fields;
+        }
+      });
+    });
+  }
+  function markLead(msgs) {
+    msgs.forEach(function (m) {
+      var list = m && Array.isArray(m.richElements) ? m.richElements : [m];
+      list.forEach(function (el) {
+        var p = cardFieldsOf(el);
+        if (p && typeof p.display_text === "string" && p.display_text) { p._lead = true; }
+      });
+    });
+  }
+  function voiceAdd(utts) {
+    if (!voice.on || !Array.isArray(utts)) { return; }
+    utts.forEach(function (u) {
+      if (!u || !Array.isArray(u.messages)) { return; }
+      if (!u.isBot) { voice.texts = []; voice.lead = ""; return; }   /* a new customer turn starts a new reply */
+      fixRich(u.messages);
+      var lead = leadOf(u.messages);
+      if (lead) {
+        voice.lead = lead;
+        markLead(u.messages);
+        voice.texts.forEach(function (id) { hideUtterance(id, 0); });
+        voice.texts = [];
+        return;
+      }
+      var isText = u.messages.some(function (m) { return m && m.type === "text"; });
+      if (!isText || !u.utteranceId) { return; }
+      if (voice.lead) { hideUtterance(u.utteranceId, 0); }   /* the text arrived after the card of the same reply */
+      else if (voice.texts.indexOf(u.utteranceId) < 0) { voice.texts.push(u.utteranceId); }
+    });
+  }
+  function voiceUpdate(utts) {
+    if (!voice.on || !Array.isArray(utts)) { return; }
+    utts.forEach(function (u) { if (u && u.utteranceId && voice.hidden[u.utteranceId]) { hideUtterance(u.utteranceId, 0); } });
+  }
+  function voiceStart() {
+    var el = chatEl();
+    if (el && typeof el.registerMessageConsumer === "function" && !voice.registered) {
+      try { el.registerMessageConsumer(voiceConsumer); voice.registered = true; } catch (err) { console.warn("[wgl] speech pilot consumer failed:", err); }
+    }
+    voice.on = true;
+  }
+  function voiceStop() { voice.on = false; voice.texts = []; voice.lead = ""; }
+
   function onResponse(e) {
     try { normalizeMessages(e && e.detail && e.detail.messages); }
     catch (err) { console.warn("[wgl] could not normalize the reply:", err); }
+    try { applyDisplayText(e && e.detail && e.detail.messages); }
+    catch (err3) { console.warn("[wgl] speech pilot could not apply display_text (text stays visible):", err3); }
     try {
       var raw = e && e.detail && e.detail.raw;
       var outs = (raw && raw.outputs) || [];
@@ -1155,6 +1309,9 @@
       window.addEventListener(n, function () { syncPlaceholder(); wireSdk(); });
     });
     window.addEventListener("chat-messenger-response-received", onResponse);
+    window.addEventListener("chat-messenger-start-bidi", voiceStart);
+    window.addEventListener("chat-messenger-connect-bidi", voiceStart);
+    window.addEventListener("chat-messenger-disconnect-bidi", voiceStop);
     window.addEventListener("chat-messenger-open-changed", onOpenChanged);
     window.addEventListener("chat-messenger-start-new-session", onSessionReset);
     window.addEventListener("chat-messenger-session-ended", function () { setWelcomeShown(false); });
@@ -1171,6 +1328,8 @@
   window.openAssistant = function () { openAssistant(0); };
 
   /* Used by widget-preview.html and handy in the console: WGLCards.create("show_bill_trend_card", {...}) */
+  /* Test hooks of the Rev 27 speech pilot (pure functions and the voice consumer). */
+  window.WGLSpeech = { leadOf: leadOf, applyDisplayText: applyDisplayText, normalize: normalizeMessages, consumer: voiceConsumer, state: voice, start: voiceStart, stop: voiceStop };
   window.WGLCards = {
     tools: WGL_TOOLS,
     welcome: WELCOME,

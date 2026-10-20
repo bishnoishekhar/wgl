@@ -78,7 +78,7 @@
   typing();
   tag("agent reply cards follow");
 
-  bubble("Hi Maria, welcome back. I can see your bill is higher than last month. Want me to look into it?", "bot");
+  bubble("Hi Chander, welcome back. I can see your bill is higher than last month. Want me to look into it?", "bot");
   card("show_quick_actions", { prompt: "What would you like to do?", options: ["Why is my bill high?", "Pay my bill", "Find rebates"] });
   bubble("Why is my bill high?", "user");
 
@@ -157,6 +157,13 @@
     { period: "Apr 2026", usage: 104.5, hdd: 409 }, { period: "May 2026", usage: 56.1, hdd: 190 }, { period: "Jun 2026", usage: 24.4, hdd: 53 },
     { period: "Jul 2026", usage: 13.2, hdd: 6 }, { period: "Aug 2026", usage: 12.8, hdd: 2 }, { period: "Sep 2026", usage: 10.9, hdd: 20 }, { period: "Oct 2026", usage: 50.3, hdd: 137 } ],
     stats: [ { label: "Heating degree days", value: "137 (20 last month)" }, { label: "Gas used in Oct 2026", value: "50.3 therms" }, { label: "Peak month", value: "Feb 2026, 181.5 therms" } ] });
+
+  tag("Rev 27 speech pilot (high bill only): voice mode, the long spoken text is hidden and display_text leads the card (typed chat looks as in Rev 25 above)");
+  card("show_bill_trend_card", { display_text: "That is a big jump, and I see why.", _lead: true, highlight_note: "$54 higher than last month", months: [
+    { period: "Aug 2026", amount: 29.66 }, { period: "Sep 2026", amount: 27.39 }, { period: "Oct 2026", amount: 81.36, is_current: true } ],
+    reasons: [
+      { label: "Colder weather, more heating", amount: 41.01, direction: "up", icon: "flame" },
+      { label: "Longer billing cycle (34 vs 28 days)", amount: 5.94, direction: "up", icon: "calendar" } ] });
 
   var t = document.createElement("div"); t.className = "typing"; t.setAttribute("aria-label", "Assistant is typing");
   t.innerHTML = "<i></i><i></i><i></i>"; tag("typing indicator (reference)"); box.appendChild(t);
