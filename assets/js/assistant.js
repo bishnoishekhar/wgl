@@ -1201,7 +1201,16 @@
      with display_text in front of the card in that same utterance (the SDK draws it as an ordinary bot bubble) and hides the long
      text bubble. Nothing is ever drawn inside the card. If the bubble cannot be found on screen shortly afterwards, the long text
      is shown again (the fallback of the pilot: the customer always sees an answer). */
-  function plainText(t) { return String(t || "").replace(/\*\*/g, "").replace(/\s+/g, " ").replace(/^ | $/g, ""); }
+  /* Rev 29c: compared as normalized plain text. The SDK draws markdown (**bold** becomes <strong>, "\n" becomes <br> with no whitespace text
+     node between the lines, links lose their syntax), so the raw display_text never matched the DOM text. Everything is reduced to lowercase
+     letters and digits only before comparing, and only the first 30 such characters of the lead are looked for. */
+  function plainText(t) {
+    var s = String(t || "");
+    s = s.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#0*39;/g, "'");
+    s = s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/(\*\*|__|`)/g, "");
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+  function leadKey(lead) { return plainText(lead).slice(0, 30); }
   function deepText(rootNode) {
     var out = "";
     (function walk(r) {
@@ -1219,15 +1228,16 @@
     var e = utterEl(id);
     if (e) { e.style.display = ""; e.removeAttribute("data-wgl-hidden"); }
   }
+  var leadWarned = false;
   function verifyLead(cardId, lead, hiddenIds, tries) {
     var e = utterEl(cardId);
-    var want = plainText(lead);
+    var want = leadKey(lead);
+    if (!want) { return; }
     if (e && plainText(deepText(e.shadowRoot || e)).indexOf(want) > -1) { return; }
     if ((tries || 0) < 12) { setTimeout(function () { verifyLead(cardId, lead, hiddenIds, (tries || 0) + 1); }, 150); return; }
-    console.warn("[wgl] the lead bubble did not appear; the long text is shown again");
+    if (!leadWarned) { leadWarned = true; try { console.warn("[wgl] the lead bubble did not appear; the long text is shown again"); } catch (err) { /* ignore */ } }
     hiddenIds.forEach(showUtterance);
-  }
-  function insertLeadBubble(messages, lead) {
+  }  function insertLeadBubble(messages, lead) {
     for (var i = 0; i < messages.length; i++) {
       var m = messages[i];
       if (m && m.type === "customCard") { messages.splice(i, 0, { type: "text", text: lead, _wglLead: true }); return true; }
