@@ -232,3 +232,25 @@ Agents: `show_options_card` and `show_compare_table_card` and `show_checklist_ca
 * **Voice lead check (Rev 29c).** The page confirms the inserted lead bubble is on screen by comparing normalized plain text: markdown markers, entities, case, whitespace and line breaks are ignored (letters and digits only, first 30 characters), because the SDK draws `**bold**` as <strong> and a newline as <br> with no space between the lines. The long text is shown again only if the lead is truly absent after about 2 s, with one console warning per page load.
 * **No repeats inside a card.** When `display_text` is present, a card heading or hint of `show_options_card`, `show_compare_table_card`, `show_checklist_card`, `show_bill_summary_card` that repeats a sentence of it (three or more words) is replaced by the card's own default (`Your options`, `Tap one to continue`, `Compare`, `Good to know`, `Bill summary`); the options footnote is dropped when it repeats `display_text` or says `No card fee` while a row already carries it as badge or benefit; the trend card's `highlight_note` is dropped when `display_text` already says it. Without `display_text` nothing is dropped (preview and older replies are pixel-identical).
 * **Agent contract.** Payment methods: `title` Ways to pay, `prompt` Tap one to continue., no footnote when the badge says No card fee; `display_text` Your balance is **$83.32**, due **November 7, 2026**. How would you like to pay? High bill: `display_text` That is a big jump, and I see why. Your bill is about **$55 higher** than last month. The spoken text part of every reply is unchanged.
+
+## 0h. Rev 30: the human handoff card (chat only)
+
+`show_handoff_card` / `cx-show-handoff-card` is emitted by the before_model callback (`_handoff_response`), never chosen by the model: the model only sets `_action_trigger` to `live_agent_handoff` as before. The card shows the case summary the representative will see, then opens the live chat.
+
+```json
+show_handoff_card          // cx-show-handoff-card, chat only, never during a gas emergency
+  {"headline": "Connecting you to a team member",
+   "detail": "A representative will join this chat in a moment.",
+   "queue_label": "Billing team", "verified": true, "masked_account": "XXXX-XXXX-4417",
+   "summary_lines": ["The customer asked to speak with a person.", "Was working on: pay bill.",
+                     "Identity verified in this chat."],
+   "action_label": "Start the chat",
+   "action_message": "Please connect me to a representative."}        // required: headline
+```
+
+Rules specific to this card:
+
+* **The button does not message the agent.** `assistant.js` listens for the card's `wgl-send` event (section 1c, cancelable) and calls `window.wglOpenLiveChat(detail)` instead, cancelling the send. While `wglOpenLiveChat` is undefined the event is left alone and `action_message` reaches the agent as an ordinary message, so the card is never a dead end.
+* **The turn does not end the session.** As with the emergency card, a widget call that shares a response with `end_session` loses its card, so on chat the handoff turn emits text plus card and leaves the session open. `_handoff_card_shown` stops the card repeating and re-recording the handoff; `_settle_after_handoff` clears the leftover `_escalation_reason` at the start of the next turn, because the after_model `_recover_trigger` would otherwise turn it into a fresh `live_agent_handoff` every turn. **Voice is unchanged** and still ends the session (the whole card branch is behind `channel == "chat"`).
+* **Never during an emergency.** `_emergency_active()` (set by `emergency_detected` or `_emergency_card_shown`) sends the handoff back to the voice path with no card, so the safety card is never covered.
+* `summary_lines` is two to four short lines and must never carry a PIN, social security digits or card digits. `masked_account` (`XXXX-XXXX-<last four>`) is the only account form shown.

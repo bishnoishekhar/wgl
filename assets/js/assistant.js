@@ -961,6 +961,25 @@
           '<span class="ct">' + esc(it.text) + (it.detail ? '<span class="cd">' + esc(it.detail) + "</span>" : "") + "</span></li>";
       }).join("") + "</" + tag + ">" + (a.footnote ? '<p class="fn">' + esc(a.footnote) + "</p>" : "") +
         (a.action_label && a.action_message ? '<div class="cact">' + actionBtn(a.action_label, a.action_message, "") + "</div>" : "");
+    },
+    /* Rev 30 human handoff. Shows what the representative will see before the live chat opens. The button is
+       intercepted by the page (see the wgl-send listener) and opens the live chat instead of messaging the agent. */
+    show_handoff_card: function (a) {
+      flexCardArgs = a;  /* the bridge reads reason/queue/summary from here on the button tap */
+      var lines = arr(a.summary_lines, 4);
+      var verified = a.verified === true || String(a.verified).toLowerCase() === "true";
+      return '<div class="hand" role="status">' +
+        '<div class="hh"><span class="hspin" aria-hidden="true"></span><span class="ht">' +
+        esc(a.headline || "Connecting you to a team member") + "</span></div>" +
+        (a.detail ? '<p class="hd">' + esc(a.detail) + "</p>" : "") +
+        '<div class="hmeta">' +
+        (a.queue_label ? '<span class="hq">' + esc(a.queue_label) + "</span>" : "") +
+        '<span class="hv ' + (verified ? "on" : "off") + '">' + (verified ? "Verified" : "Not verified") + "</span>" +
+        (a.masked_account ? '<span class="hacct">' + esc(a.masked_account) + "</span>" : "") + "</div>" +
+        (lines.length ? '<div class="hsum"><div class="hsl">What the representative will see</div><ul class="hul">' +
+          lines.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul></div>" : "") +
+        (a.action_label && a.action_message ? '<div class="cact">' + actionBtn(a.action_label, a.action_message, "") + "</div>" : "") +
+        "</div>";
     }
   };
   var WGL_TOOLS = Object.keys(CARDS);
@@ -1078,6 +1097,22 @@
     ".cmp .nt{display:block;font-weight:400;font-size:11.5px;color:var(--ink2);margin-top:1px}" +
     ".cmp td.hl{background:#fff8e1;font-weight:700}.cmp thead th.hl{background:var(--gold);color:var(--navy)}" +
     ".cmp .hb{display:block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px}" +
+    /* Rev 30 handoff card */
+    ".hand{display:flex;flex-direction:column;gap:10px}" +
+    ".hh{display:flex;align-items:center;gap:9px}.ht{font-weight:800;font-size:15.5px;color:var(--navy)}" +
+    ".hspin{width:14px;height:14px;border-radius:50%;border:2.5px solid var(--line);border-top-color:var(--blue);animation:hspin .9s linear infinite;flex:none}" +
+    "@keyframes hspin{to{transform:rotate(360deg)}}" +
+    "@media (prefers-reduced-motion:reduce){.hspin{animation:none;border-top-color:var(--line)}}" +
+    ".hd{margin:0;font-size:13.5px;line-height:1.4;color:var(--ink2)}" +
+    ".hmeta{display:flex;flex-wrap:wrap;gap:6px}" +
+    ".hq,.hv,.hacct{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:999px;border:1.5px solid var(--line);background:var(--pale);color:var(--navy)}" +
+    ".hv.on{background:#e6f5ec;border-color:#4eaf6b;color:#1d6b38}.hv.off{background:#fff6e0;border-color:#d99a00;color:#7a5600}" +
+    ".hacct{font-variant-numeric:tabular-nums}" +
+    ".hsum{background:var(--pale);border:1px solid var(--line);border-radius:12px;padding:10px 12px}" +
+    ".hsl{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2);margin-bottom:6px}" +
+    ".hul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}" +
+    ".hul li{font-size:13px;line-height:1.35;padding-left:14px;position:relative}" +
+    ".hul li:before{content:'';position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--blue)}" +
     ".cl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}.cl li{display:flex;gap:10px;align-items:flex-start}" +
     ".cl .ct{flex:1;min-width:0;font-size:14px;line-height:1.35;font-weight:600;padding-top:5px}.cl .cd{display:block;font-weight:400;font-size:12.5px;color:var(--ink2);margin-top:1px}" +
     ".cl .dot{background:var(--navy);border-color:var(--navy);color:#fff}" +
@@ -1691,11 +1726,225 @@
   }
 
   /* ---------------------------------------------------------------- init */
+  /* ============================================================================================
+     Rev 30 Phase 2: the live-chat bridge.
+
+     The GECX widget stays the only chat window. On handoff the page joins a Twilio Conversation
+     and takes over the composer:
+       inbound   agent message  -> chatMessenger.renderCustomText(body, true)   (public SDK method)
+       outbound  customer types -> posted straight to the Conversation          (our own composer)
+     The SDK's own input is hidden, because a message typed into it always reaches the CES agent:
+     chat-messenger-user-input-entered is not cancelable and there is no public send hook
+     (widget-contract 1a/1c). The CES session is left idle, so no model call and no token quota.
+     ============================================================================================ */
+
+  var FLEX_SDK_URL = "https://sdk.twilio.com/js/conversations/v2.6/twilio-conversations.min.js";
+  var FLEX_ENDPOINT = window.WGL_HANDOFF_ENDPOINT ||
+    "https://wgl-handoff-4282-dev.twil.io/create-handoff-conversation";
+  var flexCardArgs = null;
+  var flex = { active: false, client: null, conversation: null, bar: null, observer: null, agent: "", identity: "" };
+
+  var FLEX_TEXT = {
+    EN: {
+      connecting: "Connecting you to a team member...",
+      connected: "CONNECTED TO A TEAM MEMBER",
+      placeholder: "Type your message",
+      send: "Send",
+      ended: "The chat with our team member has ended.",
+      failed: "I could not reach a team member just now. You can call us at 844-927-4427, or I can take a callback request."
+    },
+    ES: {
+      connecting: "Le comunicamos con un miembro del equipo...",
+      connected: "CONECTADO CON UN MIEMBRO DEL EQUIPO",
+      placeholder: "Escriba su mensaje",
+      send: "Enviar",
+      ended: "El chat con nuestro representante ha terminado.",
+      failed: "No pude comunicarle con un representante. Puede llamarnos al 844-927-4427, o puedo tomar una solicitud de devolucion de llamada."
+    }
+  };
+
+  function flexLang() { return readLang(window.wglPageContext) === "ES" ? "ES" : "EN"; }
+  function flexWords() { return FLEX_TEXT[flexLang()]; }
+
+  /* The SDK composer, reached through the open shadow roots (verified live on the preview page). */
+  function flexNativeInput() {
+    var bubble = doc.querySelector("chat-messenger-chat-bubble");
+    var container = bubble && bubble.shadowRoot && bubble.shadowRoot.querySelector("chat-messenger-container");
+    return (container && container.shadowRoot && container.shadowRoot.querySelector("chat-messenger-user-input")) || null;
+  }
+
+  function flexLoadSdk() {
+    if (window.Twilio && window.Twilio.Conversations) { return Promise.resolve(); }
+    return new Promise(function (resolve, reject) {
+      var s = doc.createElement("script");
+      s.src = FLEX_SDK_URL;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error("conversations sdk failed to load")); };
+      doc.head.appendChild(s);
+    });
+  }
+
+  function flexPlaceComposer() {
+    var input = flexNativeInput();
+    if (!input || !flex.bar) { return; }
+    var r = input.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) { flex.bar.style.display = "none"; return; }
+    flex.bar.style.display = "flex";
+    flex.bar.style.left = r.x + "px";
+    flex.bar.style.top = r.y + "px";
+    flex.bar.style.width = r.width + "px";
+    flex.bar.style.height = r.height + "px";
+  }
+
+  function flexMountComposer(onSend) {
+    var input = flexNativeInput();
+    if (!input) { return false; }
+    input.style.visibility = "hidden";
+    input.style.pointerEvents = "none";
+
+    var w = flexWords();
+    var bar = doc.createElement("div");
+    bar.id = "wgl-flex-composer";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", w.connected);
+    bar.style.cssText = "position:fixed;z-index:2147483646;background:#fff;border-top:1px solid #d3e3f1;" +
+      "box-sizing:border-box;padding:14px 16px;display:flex;flex-direction:column;gap:8px;" +
+      "font-family:Figtree,system-ui,-apple-system,Segoe UI,Roboto,sans-serif";
+    bar.innerHTML =
+      '<div style="font-size:11.5px;font-weight:700;color:#0072bc;letter-spacing:.3px">' + esc(w.connected) + "</div>" +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+      '<input id="wgl-flex-input" autocomplete="off" aria-label="' + esc(w.placeholder) + '" placeholder="' + esc(w.placeholder) +
+      '" style="flex:1;min-width:0;padding:10px 12px;border:1.5px solid #ced4da;border-radius:12px;font:inherit;font-size:14px;color:#212529;outline:none">' +
+      '<button type="button" id="wgl-flex-send" style="flex:none;background:#002a5c;color:#ffc72c;border:0;border-radius:8px;' +
+      'padding:10px 14px;font:inherit;font-weight:700;cursor:pointer">' + esc(w.send) + "</button></div>";
+    doc.body.appendChild(bar);
+    flex.bar = bar;
+
+    var field = bar.querySelector("#wgl-flex-input");
+    var fire = function () {
+      var text = field.value.trim();
+      if (!text) { return; }
+      field.value = "";
+      onSend(text);
+    };
+    bar.querySelector("#wgl-flex-send").addEventListener("click", fire);
+    field.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); fire(); } });
+    field.addEventListener("focus", function () { field.style.borderColor = "#0072bc"; });
+    field.addEventListener("blur", function () { field.style.borderColor = "#ced4da"; });
+
+    flexPlaceComposer();
+    /* The window is fixed-position, so the rect only moves on resize or when the widget re-lays out
+       (mobile full screen, the collapse arrow). Both are covered. */
+    if (window.ResizeObserver) {
+      flex.observer = new ResizeObserver(flexPlaceComposer);
+      flex.observer.observe(doc.documentElement);
+    }
+    window.addEventListener("resize", flexPlaceComposer);
+    window.addEventListener("chat-messenger-open-changed", flexPlaceComposer);
+    setTimeout(flexPlaceComposer, 400);
+    field.focus();
+    return true;
+  }
+
+  function flexSay(text, isBot) {
+    var el = chatEl();
+    if (el && typeof el.renderCustomText === "function") { el.renderCustomText(text, isBot !== false); }
+  }
+
+  function flexTeardown(message) {
+    flex.active = false;
+    if (flex.observer) { try { flex.observer.disconnect(); } catch (e) {} flex.observer = null; }
+    window.removeEventListener("resize", flexPlaceComposer);
+    window.removeEventListener("chat-messenger-open-changed", flexPlaceComposer);
+    if (flex.bar) { flex.bar.remove(); flex.bar = null; }
+    var input = flexNativeInput();
+    if (input) { input.style.visibility = ""; input.style.pointerEvents = ""; }
+    if (flex.conversation) { try { flex.conversation.removeAllListeners(); } catch (e) {} }
+    if (flex.client) { try { flex.client.shutdown(); } catch (e) {} }
+    flex.client = null;
+    flex.conversation = null;
+    flex.agent = "";
+    flex.identity = "";
+    if (message) { flexSay(message, true); }
+  }
+
+  /* Called by the handoff card's intercepted wgl-send (see the listener in init). */
+  function wglOpenLiveChat(detail) {
+    if (flex.active) { return; }
+    flex.active = true;
+    var card = (detail && detail.card) || flexCardArgs || {};
+    flexSay(flexWords().connecting, true);
+
+    flexLoadSdk()
+      .then(function () {
+        return fetch(FLEX_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reason: card.reason || "user_requested_agent",
+            queue: card.queue || "",
+            verified: card.verified === true,
+            masked_account: card.masked_account || "",
+            summary_lines: card.summary_lines || [],
+            language: flexLang(),
+            page_context: window.wglPageContext || ""
+          })
+        });
+      })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.ok || !data.token) {
+          throw new Error((data && data.error) || "handoff_unavailable");
+        }
+        flex.identity = data.identity || "";
+        return window.Twilio.Conversations.Client.create(data.token).then(function (client) {
+          flex.client = client;
+          return client.getConversationBySid(data.conversation_sid);
+        });
+      })
+      .then(function (conversation) {
+        flex.conversation = conversation;
+        conversation.on("messageAdded", function (message) {
+          /* Our own line is already on screen. Twilio replays it through messageAdded, and
+             conversation.localParticipant is not populated yet on the first event, so the identity
+             returned by the backend is what we compare against (verified live: without this the
+             customer's own sentence came back as a second, bot-styled bubble). */
+          if (!message || !message.body) { return; }
+          if (flex.identity && message.author === flex.identity) { return; }
+          if (conversation.localParticipant && message.author === conversation.localParticipant.identity) { return; }
+          if (!flex.agent && message.author) { flex.agent = String(message.author); }
+          flexSay(message.body, true);
+        });
+        conversation.on("removed", function () { flexTeardown(flexWords().ended); });
+        var mounted = flexMountComposer(function (text) {
+          flexSay(text, false);
+          conversation.sendMessage(text)["catch"](function (err) {
+            console.warn("WGL: message to the representative failed", err);
+          });
+        });
+        if (!mounted) { throw new Error("composer_unavailable"); }
+      })["catch"](function (err) {
+        console.warn("WGL: live chat could not be opened", err);
+        var failed = flexWords().failed;
+        flexTeardown();
+        flexSay(failed, true);
+      });
+  }
+
   function init() {
     fab = doc.querySelector(".assistant-fab");
     toast = doc.querySelector(".assistant-toast");
     doc.querySelectorAll("[data-open-assistant]").forEach(function (el) {
       el.addEventListener("click", function (ev) { ev.preventDefault(); openAssistant(0); });
+    });
+    /* Rev 30: the handoff card's button opens the live chat instead of messaging the assistant. wgl-send is the
+       documented cancelable hook (widget-contract 1c). When the live chat is not wired up yet the event is left
+       alone and the card's action_message goes to the agent as before, so the card never becomes a dead end. */
+    window.addEventListener("wgl-send", function (ev) {
+      if (!ev.detail || ev.detail.tool !== "show_handoff_card") { return; }
+      if (typeof window.wglOpenLiveChat !== "function") { return; }
+      ev.preventDefault();
+      try { window.wglOpenLiveChat(ev.detail); } catch (err) { console.warn("WGL: live chat could not be opened", err); }
     });
     if (PREVIEW) { return; }
     syncPlaceholder();
@@ -1725,6 +1974,8 @@
 
   if (doc.readyState === "loading") { doc.addEventListener("DOMContentLoaded", init); } else { init(); }
   window.openAssistant = function () { openAssistant(0); };
+  /* Rev 30: the handoff card's wgl-send listener calls this to open the live chat. */
+  window.wglOpenLiveChat = wglOpenLiveChat;
 
   /* Used by widget-preview.html and handy in the console: WGLCards.create("show_bill_trend_card", {...}) */
   /* Test hooks of the Rev 27 speech pilot (pure functions and the voice consumer). */
