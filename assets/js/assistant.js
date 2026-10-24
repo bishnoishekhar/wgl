@@ -1098,7 +1098,15 @@
   function displayTextOf(el) {
     var p = cardFieldsOf(el);
     var d = p && p.display_text;
+    if (typeof d !== "string" && p && typeof p.safety_text === "string") { return emergencyLead(p.safety_text); }
     return typeof d === "string" ? d.replace(/^\s+|\s+$/g, "") : "";
+  }
+  /* The gas emergency card carries the full safety text and the agent sends it no display_text, so the long text bubble above
+     it repeated the card word for word. The page supplies the short bubble itself; the card and the spoken text are unchanged. */
+  function emergencyLead(safetyText) {
+    return /[¿¡ñáéíóú]|\b(llame|salga|edificio)\b/i.test(safetyText)
+      ? "**Por favor salga del edificio ahora y llame al 911.**"
+      : "**Please leave the building now and call 911.**";
   }
   /* The display_text of a reply: from a flat card message or from the rich elements of a customCard message. */
   function leadOf(msgs) {
