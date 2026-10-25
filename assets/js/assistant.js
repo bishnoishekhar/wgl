@@ -719,7 +719,9 @@
       var tel = String(a.emergency_number || "").replace(/[^0-9+]/g, "");
       return '<div class="emerg" role="alert"><div class="eh"><span aria-hidden="true">' + ICON.alert + "</span> Gas emergency</div>" +
         '<p class="et">' + esc(a.safety_text) + "</p>" +
-        (tel ? '<a class="ecall" href="tel:' + esc(tel) + '">Call ' + esc(a.emergency_number) + "</a>" : "") + "</div>";
+        (tel ? '<a class="ecall" href="tel:' + esc(tel) + '">Call ' + esc(a.emergency_number) + "</a>" : "") +
+        (a.note ? '<p class="enote">' + esc(a.note) + "</p>" : "") +
+        (a.action_label && a.action_message ? '<div class="esafe" role="group" aria-label="Next step" data-lock="1"><button type="button" class="esafebtn" data-send="' + esc(a.action_message) + '">' + esc(a.action_label) + "</button></div>" : "") + "</div>";
     },
     show_csat_card: function (a) {
       return head(a.prompt || "How did we do?", "Tap a star", "") + '<div class="stars" data-lock="1">' + stars() + "</div>";
@@ -851,6 +853,9 @@
     ".emerg{background:#8a1810;color:#fff;border-radius:16px;padding:14px;border:3px solid #ffc72c;box-shadow:0 8px 22px rgba(138,24,16,.35)}" +
     ".eh{font-weight:800;font-size:16px;display:flex;align-items:center;gap:8px}.et{margin:8px 0 12px;font-size:14px;line-height:1.45}" +
     ".ecall{display:block;text-align:center;font-weight:800;font-size:17px;background:var(--gold);color:var(--navy);padding:10px;border-radius:10px;text-decoration:none}" +
+    ".enote{margin:12px 2px 8px;font-size:13.5px;line-height:1.4}" +
+    ".esafebtn{display:block;width:100%;text-align:center;font:inherit;font-weight:700;font-size:15px;color:#fff;background:transparent;border:2px solid #fff;border-radius:10px;padding:9px;cursor:pointer}" +
+    ".esafebtn:hover,.esafebtn:focus-visible{background:rgba(255,255,255,.18)}.esafebtn.picked{background:#fff;color:#8a1810}.esafe.done .esafebtn{cursor:default}" +
     ".stars{display:flex;gap:2px;justify-content:center}.star{background:none;border:0;padding:2px;color:#b6c8d9;cursor:pointer;transition:transform .12s,color .12s}.star:hover,.star:focus-visible{color:#d99a00;transform:scale(1.15)}" +
     "[data-lock].done .star.picked{color:#d99a00;opacity:1;background:none}" +
     ".empty{margin:0;font-size:13px;color:var(--ink2)}" +
@@ -1105,8 +1110,8 @@
      it repeated the card word for word. The page supplies the short bubble itself; the card and the spoken text are unchanged. */
   function emergencyLead(safetyText) {
     return /[¿¡ñáéíóú]|\b(llame|salga|edificio)\b/i.test(safetyText)
-      ? "**Por favor salga del edificio ahora y llame al 911.**"
-      : "**Please leave the building now and call 911.**";
+      ? "**Por favor salga del edificio de inmediato y llame al 911.**"
+      : "**Please leave the building immediately and call 911.**";
   }
   /* The display_text of a reply: from a flat card message or from the rich elements of a customCard message. */
   function leadOf(msgs) {
