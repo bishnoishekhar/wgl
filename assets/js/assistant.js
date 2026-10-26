@@ -616,7 +616,7 @@
       doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.text(pdfText(a.claim_id), W - M, 62, { align: "right" });
       doc.setTextColor(0, 42, 92); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
       y = 120;
-      doc.text(pdfText("Filed " + (a.submitted_on || "") + "   |   Status: Received   |   First response within " + (a.response_window || "48 to 72 hours")), M, y);
+      doc.text(pdfText("Filed " + (a.submitted_on || "") + "   |   Status: " + (a.status_label || "Received") + "   |   First response within " + (a.response_window || "48 to 72 hours")), M, y);
       y += 24;
       function ensure(h) { if (y + h > 735) { doc.addPage(); y = 60; } }
       function section(title) {
@@ -823,7 +823,7 @@
       }).join("") + "</ol>" + (a.note ? '<p class="note">' + esc(a.note) + "</p>" : "");
     },
     show_damage_claim_card: function (a) {
-      var rows = arr(a.rows, 20), sent = a.state === "submitted";
+      var rows = arr(a.rows, 20), kind = a.state, sent = kind === "submitted" || kind === "status";
       if (!rows.length) { return head("Damage claim", "", ICON.doc) + empty(); }
       var SRC = { account: "From your account", photo: "From your photo", you: "From you" };
       var form = '<div class="dform">' + rows.map(function (r) {
@@ -840,9 +840,9 @@
           (a.note ? '<p class="fn">' + esc(a.note) + "</p>" : "");
       }
       var st = arr(a.steps, 6);
-      return head("Claim received", "Washington Gas damage claim", ICON.check) +
-        '<div class="ticket"><span class="tk">Ticket number</span><b class="tn">' + esc(a.claim_id) + '</b><span class="ts">Filed ' + esc(a.submitted_on) +
-        (a.response_window ? " &middot; first response within " + esc(a.response_window) : "") + "</span></div>" +
+      return head(kind === "status" ? "Claim status" : "Claim received", "Washington Gas damage claim", kind === "status" ? ICON.doc : ICON.check) +
+        '<div class="ticket"><span class="tk">Ticket number</span><b class="tn">' + esc(a.claim_id) + '</b><span class="ts">' + (kind === "status" ? "Status: " + esc(a.status_label || "Received") + " &middot; filed " + esc(a.submitted_on) :
+        "Filed " + esc(a.submitted_on) + (a.response_window ? " &middot; first response within " + esc(a.response_window) : "")) + "</span></div>" +
         (st.length ? '<ol class="steps">' + st.map(function (s, i) {
           var state = s.state === "done" || s.state === "current" ? s.state : "todo";
           var word = state === "done" ? "Done" : state === "current" ? "Next" : "Later";
