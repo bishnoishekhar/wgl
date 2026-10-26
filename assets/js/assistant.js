@@ -700,6 +700,29 @@
     return label && msg ? '<button type="button" class="btn ' + (cls || "") + '" data-send="' + esc(msg) + '">' + esc(label) + "</button>" : "";
   }
 
+  /* Rev 31: the handoff card's button row. The chat button is produced by actionBtn exactly as before; the
+     call button is added by the PAGE whenever a call number is configured, so neither the card payload nor the
+     agent has to change for it to appear. A payload call_label/call_message only overrides the wording. */
+  function callNumber() {
+    var cfg = window.WGL_CALL || {};
+    return String(cfg.number || "+16414368986");
+  }
+  function callActionBtn(a) {
+    var cfg = window.WGL_CALL || {};
+    if (cfg.enabled === false || !callNumber()) { return ""; }
+    var es = readLang(window.wglPageContext) === "es";
+    var label = a.call_label || cfg.label || (es ? "Llamar a un agente" : "Call the agent");
+    return '<button type="button" class="btn ghost" data-action="call" data-send="' +
+      esc(a.call_message || a.action_message || "") + '"><span class="bico" aria-hidden="true">' +
+      OICON.phone + "</span>" + esc(label) + "</button>";
+  }
+  function handoffActions(a) {
+    var chat = a.action_label && a.action_message ? actionBtn(a.action_label, a.action_message, "") : "";
+    var call = callActionBtn(a);
+    if (!chat && !call) { return ""; }
+    return '<div class="cact' + (chat && call ? " hcta" : "") + '">' + chat + call + "</div>";
+  }
+
   /* severity -> badge text, class, glyph (never colour alone) */
   var SEV = {
     info: { t: "Good to know", g: "i" },
@@ -978,7 +1001,7 @@
         (a.masked_account ? '<span class="hacct">' + esc(a.masked_account) + "</span>" : "") + "</div>" +
         (lines.length ? '<div class="hsum"><div class="hsl">What the representative will see</div><ul class="hul">' +
           lines.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul></div>" : "") +
-        (a.action_label && a.action_message ? '<div class="cact">' + actionBtn(a.action_label, a.action_message, "") + "</div>" : "") +
+        handoffActions(a) +
         "</div>";
     }
   };
@@ -1113,6 +1136,11 @@
     ".hul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}" +
     ".hul li{font-size:13px;line-height:1.35;padding-left:14px;position:relative}" +
     ".hul li:before{content:'';position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--blue)}" +
+    /* Rev 31: two buttons on the handoff card - chat (primary) and call (secondary) */
+    ".hcta{display:flex;flex-wrap:wrap;gap:8px}.hcta .btn{align-self:stretch}" +
+    ".btn.ghost{background:#fff;color:var(--navy);border-color:var(--navy);display:inline-flex;align-items:center;gap:7px}" +
+    ".btn.ghost:hover{background:var(--pale);color:var(--navy);box-shadow:0 3px 0 var(--gold)}" +
+    ".bico{display:inline-flex;flex:none}.bico svg{width:16px;height:16px;display:block}" +
     ".cl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}.cl li{display:flex;gap:10px;align-items:flex-start}" +
     ".cl .ct{flex:1;min-width:0;font-size:14px;line-height:1.35;font-weight:600;padding-top:5px}.cl .cd{display:block;font-weight:400;font-size:12.5px;color:var(--ink2);margin-top:1px}" +
     ".cl .dot{background:var(--navy);border-color:var(--navy);color:#fff}" +
@@ -1215,6 +1243,15 @@
         if (group.classList.contains("done")) { return; }
         group.classList.add("done");
         t.classList.add("picked");
+      }
+      /* Rev 31: the handoff card's call button starts the voice call instead of messaging the assistant. Chat is
+         untouched - a button without data-action, or a page where the call module never loaded, falls straight
+         through to sendUserMessage with its data-send fallback sentence, exactly as before. */
+      if (t.getAttribute("data-action") === "call" && typeof window.wglStartVoiceCall === "function") {
+        var cp = this._p || {};
+        try { window.wglStartVoiceCall(cp.tool ? (cp.args || cp.data || {}) : cp); }
+        catch (err) { console.warn("WGL: the call could not be started", err); }
+        return;
       }
       if (this._tool === "show_welcome_chips") {
         /* the first agent turn: the chip text goes out with page_context and the chosen ui_language as widget variables */

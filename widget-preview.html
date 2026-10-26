@@ -48,6 +48,7 @@
 </main>
 <script>window.WGL_PREVIEW = true;</script>
 <script src="assets/js/assistant.js"></script>
+<script src="assets/js/assistant-call.js"></script>
 <script>
 (function () {
   var box = document.getElementById("msgs");
@@ -170,6 +171,14 @@
     { id: "visa", label: "Visa ending 4521", benefit: "Your card on file", badge: "No card fee", icon: "card", highlight: true, action_message: "Pay with my Visa ending 4521" },
     { id: "ach", label: "Checking account", benefit: "One-time eCheck or ACH payment", icon: "bank", action_message: "I would like to pay from my checking account" },
     { id: "other", label: "Another amount", benefit: "Pay part of the balance", icon: "money", action_message: "I would like to pay a different amount" } ] });
+
+  tag("Rev 30/31 handoff card: the chat button (primary) and the call button the page adds whenever a call number is configured");
+  var h31 = bubble("I'm connecting you to a representative now - they'll have everything we've discussed so you won't need to repeat yourself. Please hold.", "bot"); WGLTextStyle.emphasize(h31);
+  card("show_handoff_card", { headline: "Connecting you to a team member", detail: "A representative will join this chat in a moment.",
+    queue_label: "Billing team", verified: false, masked_account: "",
+    summary_lines: ["The customer asked to speak with a person.", "Identity not yet verified."],
+    action_label: "Start the chat", action_message: "Please connect me to a representative",
+    reason: "user_requested_agent", queue: "billing" });
 
   tag("Rev 29 chat text style (option A): bot text bubble in the card typeface, amounts and dates bold");
   var s29 = bubble("That is a big jump, and I see why. Your bill is about $55 higher than last month.", "bot"); s29.id = "sample-textstyle"; WGLTextStyle.emphasize(s29);
