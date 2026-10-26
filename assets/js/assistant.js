@@ -522,6 +522,52 @@
     pts.forEach(function (p) { s += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3" fill="#fff" stroke="#b45309" stroke-width="2"/>'; });
     return s + "</svg>";
   }
+  /* Daily view of one billing period (W14): the average temperature of each day as a line against the gas used each day as bars.
+     Bars use the left scale (gas per day), the line the right scale (degrees F); both scales share the same gridlines. */
+  function niceCeil(v) { var steps = [4, 8, 12, 16, 20, 40, 80, 120, 200, 400]; for (var i = 0; i < steps.length; i++) { if (v <= steps[i]) { return steps[i]; } } return Math.ceil(v / 100) * 100; }
+  function weatherDailyChart(days, unit) {
+    var n = days.length;
+    var W = 320, H = 214, pl = 30, pr = 30, pt = 22, pb = 26, base = H - pb, top = pt, ph = base - top;
+    var us = days.map(function (d) { return num(d.usage); }), ts = days.map(function (d) { return num(d.temp_f); });
+    var uTop = niceCeil(Math.max.apply(null, us) || 1), uStep = uTop / 4;
+    var tMin = Math.floor(Math.min.apply(null, ts) / 10) * 10, tSpan = Math.max(Math.max.apply(null, ts) - tMin, 1);
+    var tStep = Math.max(10, Math.ceil(tSpan / 4 / 5) * 5), tTop = tMin + tStep * 4;
+    var slot = (W - pl - pr) / n, bw = Math.max(2.5, Math.min(7, slot * 0.64));
+    var coldI = ts.indexOf(Math.min.apply(null, ts));
+    var s = svgOpen(W, H, "Daily average temperature compared with the gas used each day, " + days[0].date + " to " + days[n - 1].date +
+      ": the temperature fell to " + plain(ts[coldI]) + " degrees on " + days[coldI].date + " and the gas used that day was " + plain(us[coldI]) + " " + unit + ".");
+    for (var g = 0; g <= 4; g++) {
+      var gy = base - (g / 4) * ph;
+      s += '<line x1="' + pl + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pr) + '" y2="' + gy.toFixed(1) + '" class="gl' + (g === 0 ? " base" : "") + '"/>' +
+        '<text x="' + (pl - 5) + '" y="' + (gy + 3.5).toFixed(1) + '" text-anchor="end" class="ax">' + plain(Math.round(g * uStep * 10) / 10) + "</text>" +
+        '<text x="' + (W - pr + 5) + '" y="' + (gy + 3.5).toFixed(1) + '" text-anchor="start" class="ax tl">' + plain(tMin + g * tStep) + "&deg;</text>";
+    }
+    s += '<text x="' + pl + '" y="11" text-anchor="start" class="axt">' + esc(unit) + " a day</text>" +
+      '<text x="' + (W - pr) + '" y="11" text-anchor="end" class="axt tl">&deg;F</text>';
+    var cold = [];
+    days.forEach(function (d, i) { if (ts[i] <= tMin + tStep) { cold.push(i); } });
+    if (cold.length > 1) {
+      var x0 = pl + slot * cold[0], x1 = pl + slot * (cold[cold.length - 1] + 1);
+      s += '<rect x="' + x0.toFixed(1) + '" y="' + top + '" width="' + (x1 - x0).toFixed(1) + '" height="' + ph + '" class="snap"/>' +
+        '<text x="' + ((x0 + x1) / 2).toFixed(1) + '" y="' + (top + 10) + '" text-anchor="middle" class="axt snapt">Cold snap</text>';
+    }
+    var pts = [];
+    days.forEach(function (d, i) {
+      var h = Math.max(1.5, (us[i] / uTop) * ph), x = pl + slot * i + (slot - bw) / 2, y = base - h, cx = x + bw / 2;
+      s += '<g class="bar" style="animation-delay:' + (i * 14) + 'ms"><title>' + esc(d.date + ": " + plain(us[i]) + " " + unit + ", " + plain(ts[i]) + " F") + "</title>" +
+        '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.6" fill="' + (i === coldI ? BRAND.navy : BRAND.blue) + '"/></g>';
+      pts.push([cx, base - ((ts[i] - tMin) / (tTop - tMin)) * ph]);
+    });
+    var path = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
+    s += '<path class="line" d="' + path + '" fill="none" stroke="#b45309" stroke-width="2.200" stroke-linejoin="round" stroke-linecap="round"/>';
+    s += '<circle cx="' + pts[coldI][0].toFixed(1) + '" cy="' + pts[coldI][1].toFixed(1) + '" r="3.600" fill="#fff" stroke="#b45309" stroke-width="2.200"/>';
+    var marks = [0, Math.round((n - 1) / 5), Math.round(2 * (n - 1) / 5), Math.round(3 * (n - 1) / 5), Math.round(4 * (n - 1) / 5), n - 1];
+    marks.forEach(function (i, k) {
+      var cx = pl + slot * i + slot / 2;
+      s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="' + (k === 0 ? "start" : (k === marks.length - 1 ? "end" : "middle")) + '" class="ax' + (i === coldI ? " cur" : "") + '">' + esc(days[i].date) + "</text>";
+    });
+    return s + "</svg>";
+  }
   function donut(items, total, aria) {
     var R = 46, C = 2 * Math.PI * R, sum = items.reduce(function (a, b) { return a + Math.max(0, b.amount); }, 0) || 1;
     var s = svgOpen(140, 140, aria) + '<g transform="rotate(-90 70 70)"><circle cx="70" cy="70" r="' + R + '" fill="none" stroke="#e6eef5" stroke-width="18"/>';
@@ -609,6 +655,14 @@
     },
     show_weather_usage_card: function (a) {
       var ms = arr(a.months, 13), unit = a.unit || "units";
+      var dy = arr(a.daily, 62);
+      if (dy.length >= 7) {
+        return head("Temperature vs. gas use", dy[0].date + " to " + dy[dy.length - 1].date + ": colder days, more gas", ICON.cloud) + weatherDailyChart(dy, unit) +
+          '<div class="legend"><span><i class="sw bar"></i>Gas used per day (' + esc(unit) + ')</span><span><i class="sw ln"></i>Daily average temperature (&deg;F)</span></div>' +
+          (arr(a.stats, 3).length ? '<div class="stats wstats">' + arr(a.stats, 3).map(function (t) {
+            return '<div><span class="k">' + esc(t && t.label) + "</span><b>" + esc(t && t.value) + "</b></div>";
+          }).join("") + "</div>" : "");
+      }
       if (!ms.length) { return head("Usage and weather", "", ICON.cloud) + empty(); }
       return head("Usage vs. the weather", "Colder months need more heat", ICON.cloud) + weatherChart(ms, unit) +
         '<div class="legend"><span><i class="sw bar"></i>Gas used (' + esc(unit) + ')</span><span><i class="sw ln"></i>Heating degree days</span></div>' +
@@ -794,6 +848,8 @@
     ".seg{animation:fade .6s ease both}@keyframes fade{from{opacity:0}to{opacity:1}}" +
     ".ax{font-size:9.5px;fill:#495057;font-family:inherit}.ax.cur{fill:#002a5c;font-weight:700}" +
     ".val{font-size:10.5px;fill:#002a5c;font-weight:700;font-family:inherit}" +
+    ".gl{stroke:#e3ecf4;stroke-width:1}.gl.base{stroke:#9fb6cc}.ax.tl,.axt.tl{fill:#b45309}.axt{font-size:9.5px;fill:#495057;font-family:inherit}" +
+    ".snap{fill:#0072bc;opacity:.07}.snapt{fill:#0072bc;font-weight:700}" +
     ".dl{font-size:10px;fill:#495057}.dv{font-size:16px;font-weight:800;fill:#002a5c}" +
     ".stats{display:flex;gap:10px;margin-top:8px}.stats>div{flex:1;background:var(--pale);border:1px solid #c0ecff;border-radius:10px;padding:6px 10px;font-size:13px}" +
     ".stats .k{display:block;font-size:11px;color:var(--ink2)}" +
