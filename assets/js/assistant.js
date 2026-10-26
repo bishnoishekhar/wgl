@@ -1665,6 +1665,31 @@
     textStyleStart();
   }
 
+  /* ---- Rev 34: expanded window title bar. When the chat window is expanded, the SDK shows the title bar inside a flex row of a wide dialog
+     header, where it only takes its content width (about 414 px): the navy bar, the buttons and the gold line stop at the left. Every title bar
+     gets the full width of its row (in the normal small window 100% is the same width, so nothing changes there). Cosmetic only: any error is ignored. ---- */
+  function stretchTitlebars() {
+    function walk(root, depth) {
+      if (!root || depth > 8 || !root.querySelectorAll) { return; }
+      root.querySelectorAll("chat-messenger-titlebar").forEach(function (tb) {
+        if (tb.style.width !== "100%") { tb.style.setProperty("width", "100%", "important"); }
+      });
+      root.querySelectorAll("*").forEach(function (e) { if (e.shadowRoot) { walk(e.shadowRoot, depth + 1); } });
+    }
+    try { walk(doc, 0); } catch (err) { /* cosmetic only */ }
+  }
+  var titlebarWired = false;
+  function wireTitlebarFix() {
+    var cm = chatEl();
+    if (!cm || titlebarWired || !window.MutationObserver) { return; }
+    titlebarWired = true;
+    new MutationObserver(function () {
+      stretchTitlebars();
+      [120, 400, 1000].forEach(function (ms) { setTimeout(stretchTitlebars, ms); });
+    }).observe(cm, { attributes: true, attributeFilter: ["class"] });
+    stretchTitlebars();
+  }
+
   /* ---------------------------------------------------------------- init */
   function init() {
     fab = doc.querySelector(".assistant-fab");
@@ -1674,12 +1699,13 @@
     });
     if (PREVIEW) { return; }
     syncPlaceholder();
+    wireTitlebarFix();
     if (window.customElements && customElements.whenDefined) {
-      customElements.whenDefined("chat-messenger").then(function () { syncPlaceholder(); wireSdk(); });
+      customElements.whenDefined("chat-messenger").then(function () { syncPlaceholder(); wireSdk(); wireTitlebarFix(); });
     }
     ["chat-messenger-loaded", "chat-messenger-context-registered", "chat-messenger-session-id-set",
      "chat-messenger-start-new-session", "chat-messenger-open-changed"].forEach(function (n) {
-      window.addEventListener(n, function () { syncPlaceholder(); wireSdk(); });
+      window.addEventListener(n, function () { syncPlaceholder(); wireSdk(); wireTitlebarFix(); stretchTitlebars(); });
     });
     window.addEventListener("chat-messenger-response-received", onResponse);
     window.addEventListener("chat-messenger-start-bidi", voiceStart);
@@ -1692,7 +1718,7 @@
     window.addEventListener("chat-messenger-user-input-entered", lockWelcomeCards);
     var n = 0;
     var t = setInterval(function () {
-      syncPlaceholder(); wireSdk();
+      syncPlaceholder(); wireSdk(); wireTitlebarFix();
       if (++n > 40 || (registered && root.classList.contains("has-assistant-widget"))) { clearInterval(t); }
     }, 500);
   }
