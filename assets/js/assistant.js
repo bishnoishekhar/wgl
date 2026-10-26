@@ -453,6 +453,7 @@
     alert: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2 1 21h22L12 2zm-1 7h2v6h-2V9zm0 8h2v2h-2v-2z"/></svg>',
     tag: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 12V3h9l9 9-9 9-9-9zm5-5a1.500 1.500 0 1 0 0 3 1.500 1.500 0 0 0 0-3z"/></svg>',
     cloud: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6.500 19a4.500 4.500 0 0 1-.4-9A6 6 0 0 1 17.600 8.500 4.800 4.800 0 0 1 17.500 19h-11z"/></svg>',
+    doc: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 2h8l6 6v14H6V2zm7 1.500V9h5.500L13 3.500zM8 13h8v1.800H8V13zm0 3.500h8v1.800H8v-1.800z"/></svg>',
     dollar: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15.500V19h-2v-1.500c-1.500-.3-2.700-1.200-2.800-2.800h2c.1.700.8 1.200 1.900 1.200 1 0 1.700-.4 1.700-1.100 0-.7-.5-1-2-1.400-1.900-.5-3.400-1.200-3.400-3.100 0-1.400 1.100-2.400 2.600-2.700V5h2v1.700c1.400.3 2.400 1.300 2.500 2.700h-2c-.1-.7-.7-1.100-1.700-1.100-.9 0-1.500.4-1.500 1 0 .6.5.9 2 1.300 1.800.5 3.500 1.100 3.500 3.200 0 1.500-1.200 2.500-2.800 2.700z"/></svg>'
   };
 
@@ -567,6 +568,111 @@
       s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="' + (k === 0 ? "start" : (k === marks.length - 1 ? "end" : "middle")) + '" class="ax' + (i === coldI ? " cur" : "") + '">' + esc(days[i].date) + "</text>";
     });
     return s + "</svg>";
+  }
+  /* ---- Rev 34: damage claim. Thumbnails of the photos the customer attached (kept only in this page, never sent anywhere) and
+     the PDF copy of the filled form, built in the browser from the card data. ---- */
+  var claimUploads = [];
+  function keepClaimUpload(file) {
+    if (!file || !/^image\//.test(String(file.type || "")) || claimUploads.length >= 4 || typeof FileReader === "undefined") { return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, 900 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+        try { c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); claimUploads.push({ data: c.toDataURL("image/jpeg", 0.78), w: c.width, h: c.height }); } catch (err) { /* the copy is made without this photo */ }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  window.addEventListener("chat-messenger-file-upload-completed", function (e) { try { keepClaimUpload(e && e.detail && e.detail.file); } catch (err) { /* ignore */ } }, true);
+  function fillClaimThumbs(root) {
+    var box = root && root.querySelector && root.querySelector(".dthumbs");
+    if (!box || !claimUploads.length) { return; }
+    box.innerHTML = claimUploads.map(function (u) { return '<img alt="Photo attached to the claim" src="' + u.data + '">'; }).join("");
+  }
+  function pdfText(v) {
+    return String(v === undefined || v === null ? "" : v).replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, "-").replace(/\u00b7/g, "-").replace(/\u2026/g, "...");
+  }
+  function loadJsPdf() {
+    return new Promise(function (resolve, reject) {
+      if (window.jspdf && window.jspdf.jsPDF) { resolve(window.jspdf.jsPDF); return; }
+      var s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+      s.onload = function () { if (window.jspdf && window.jspdf.jsPDF) { resolve(window.jspdf.jsPDF); } else { reject(new Error("jsPDF missing")); } };
+      s.onerror = function () { reject(new Error("jsPDF could not be loaded")); };
+      document.head.appendChild(s);
+    });
+  }
+  function claimPdf(a) {
+    return loadJsPdf().then(function (JsPDF) {
+      var doc = new JsPDF({ unit: "pt", format: "letter" }), W = 612, M = 48, y = 0, rows = arr(a.rows, 20);
+      doc.setProperties({ title: "Washington Gas damage claim " + pdfText(a.claim_id), subject: "Customer copy (demo)" });
+      doc.setFillColor(0, 42, 92); doc.rect(0, 0, W, 88, "F"); doc.setFillColor(255, 199, 44); doc.rect(0, 88, W, 5, "F");
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(21); doc.text("Washington Gas", M, 42);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.text("Damage claim form - customer copy", M, 64);
+      doc.setFontSize(9); doc.text("TICKET NUMBER", W - M, 34, { align: "right" });
+      doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.text(pdfText(a.claim_id), W - M, 62, { align: "right" });
+      doc.setTextColor(0, 42, 92); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+      y = 120;
+      doc.text(pdfText("Filed " + (a.submitted_on || "") + "   |   Status: Received   |   First response within " + (a.response_window || "48 to 72 hours")), M, y);
+      y += 24;
+      function ensure(h) { if (y + h > 735) { doc.addPage(); y = 60; } }
+      function section(title) {
+        ensure(40); doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(0, 42, 92); doc.text(title, M, y);
+        doc.setDrawColor(255, 199, 44); doc.setLineWidth(1.5); doc.line(M, y + 5, W - M, y + 5); y += 24;
+      }
+      function field(label, value) {
+        var lines = doc.splitTextToSize(pdfText(value), W - 2 * M - 150);
+        ensure(lines.length * 13 + 8);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(95, 105, 115); doc.text(pdfText(label), M, y);
+        doc.setFontSize(10.5); doc.setTextColor(10, 25, 45); doc.text(lines, M + 150, y);
+        y += Math.max(15, lines.length * 13) + 4;
+      }
+      section("Your details");
+      rows.slice(0, 5).forEach(function (r) { field(r.label, r.value); });
+      y += 8; section("Damage details");
+      rows.slice(5).forEach(function (r) { field(r.label, r.value); });
+      var att = arr(a.attachments, 5);
+      y += 8; section("Attachments");
+      field("Attached", att.length ? att.join(", ") : "None");
+      var shots = claimUploads.slice(0, 4);
+      if (shots.length) {
+        var x = M + 150, h = 92; ensure(h + 14);
+        shots.forEach(function (u) {
+          var w = Math.min(130, Math.round(u.w / u.h * h));
+          try { doc.addImage(u.data, "JPEG", x, y, w, h); doc.setDrawColor(200, 210, 220); doc.setLineWidth(0.5); doc.rect(x, y, w, h); } catch (err) { /* skip the photo */ }
+          x += w + 8;
+        });
+        y += h + 14;
+      }
+      y += 6; section("What happens next");
+      arr(a.steps, 6).forEach(function (s, i) { field("Step " + (i + 1), s.label + (s.state === "done" ? " (done)" : "")); });
+      if (a.note) { field("Please note", a.note); }
+      var pages = doc.getNumberOfPages();
+      for (var i = 1; i <= pages; i++) {
+        doc.setPage(i); doc.setFontSize(8); doc.setTextColor(120, 130, 140); doc.setFont("helvetica", "normal");
+        doc.text("Demo copy made by the Washington Gas assistant demo. It is not an official Washington Gas document.", M, 760);
+        doc.text(pdfText(a.claim_id) + "   Page " + i + " of " + pages, W - M, 760, { align: "right" });
+      }
+      return { blob: doc.output("blob"), name: "WashingtonGas-DamageClaim-" + String(a.claim_id || "copy").replace(/[^A-Za-z0-9-]/g, "") + ".pdf" };
+    });
+  }
+  function printClaim(a) {
+    var w = window.open("", "_blank");
+    if (!w) { return; }
+    var rows = arr(a.rows, 20).map(function (r) { return "<tr><th>" + esc(r.label) + "</th><td>" + esc(r.value) + "</td></tr>"; }).join("");
+    w.document.write("<!doctype html><title>Damage claim " + esc(a.claim_id) + "</title><body style='font-family:Arial,sans-serif;padding:24px'><h1>Washington Gas damage claim</h1><h2>Ticket " +
+      esc(a.claim_id) + "</h2><table style='border-collapse:collapse'>" + rows + "</table><p>Demo copy. Not an official Washington Gas document.</p></body>");
+    w.document.close(); w.focus(); w.print();
+  }
+  function downloadClaimPdf(a) {
+    claimPdf(a).then(function (r) {
+      var url = URL.createObjectURL(r.blob), link = document.createElement("a");
+      link.href = url; link.download = r.name; document.body.appendChild(link); link.click();
+      setTimeout(function () { URL.revokeObjectURL(url); link.remove(); }, 1500);
+    }).catch(function (err) { console.warn("[wgl] PDF copy failed, opening the print view:", err); printClaim(a); });
   }
   function donut(items, total, aria) {
     var R = 46, C = 2 * Math.PI * R, sum = items.reduce(function (a, b) { return a + Math.max(0, b.amount); }, 0) || 1;
@@ -715,6 +821,36 @@
         return '<li class="step ' + state + '"><span class="dot" aria-hidden="true">' + (state === "done" ? ICON.check : (i + 1)) + '</span>' +
           '<span class="sl">' + esc(s.label) + '</span><span class="sw2">' + word + "</span></li>";
       }).join("") + "</ol>" + (a.note ? '<p class="note">' + esc(a.note) + "</p>" : "");
+    },
+    show_damage_claim_card: function (a) {
+      var rows = arr(a.rows, 20), sent = a.state === "submitted";
+      if (!rows.length) { return head("Damage claim", "", ICON.doc) + empty(); }
+      var SRC = { account: "From your account", photo: "From your photo", you: "From you" };
+      var form = '<div class="dform">' + rows.map(function (r) {
+        var s = SRC[r && r.source] ? r.source : "you";
+        return '<div class="drow"><span class="cfk">' + esc(r && r.label) + '</span><span class="cfv">' + esc(r && r.value) + '</span><span class="dsrc ' + s + '">' + esc(SRC[s]) + "</span></div>";
+      }).join("") + "</div>";
+      var att = arr(a.attachments, 5);
+      var attach = att.length ? '<div class="datt"><span class="cfk">Attached</span><span class="cfv">' + att.map(esc).join(", ") + '</span><div class="dthumbs"></div></div>' : "";
+      if (!sent) {
+        return head("Damage claim form", "Filled in from your account and your photos", ICON.doc) + form + attach +
+          '<div class="dact" data-lock="1">' +
+          (a.action_label && a.action_message ? '<button type="button" class="btn" data-send="' + esc(a.action_message) + '">' + esc(a.action_label) + "</button>" : "") +
+          (a.change_label && a.change_message ? '<button type="button" class="btn ghost" data-send="' + esc(a.change_message) + '">' + esc(a.change_label) + "</button>" : "") + "</div>" +
+          (a.note ? '<p class="fn">' + esc(a.note) + "</p>" : "");
+      }
+      var st = arr(a.steps, 6);
+      return head("Claim received", "Washington Gas damage claim", ICON.check) +
+        '<div class="ticket"><span class="tk">Ticket number</span><b class="tn">' + esc(a.claim_id) + '</b><span class="ts">Filed ' + esc(a.submitted_on) +
+        (a.response_window ? " &middot; first response within " + esc(a.response_window) : "") + "</span></div>" +
+        (st.length ? '<ol class="steps">' + st.map(function (s, i) {
+          var state = s.state === "done" || s.state === "current" ? s.state : "todo";
+          var word = state === "done" ? "Done" : state === "current" ? "Next" : "Later";
+          return '<li class="step ' + state + '"><span class="dot" aria-hidden="true">' + (state === "done" ? ICON.check : (i + 1)) + '</span><span class="sl">' + esc(s.label) + '</span><span class="sw2">' + word + "</span></li>";
+        }).join("") + "</ol>" : "") +
+        '<details class="dmore"><summary>See the filled form</summary>' + form + attach + "</details>" +
+        '<div class="dact"><button type="button" class="btn gold" data-pdf="1">' + esc(a.pdf_label || "Download my copy (PDF)") + "</button></div>" +
+        (a.note ? '<p class="fn">' + esc(a.note) + "</p>" : "");
     },
     show_payment_receipt_card: function (a) {
       return '<div class="receipt"><span class="okc" aria-hidden="true">' + ICON.check + '</span><div class="rt">Payment received</div>' +
@@ -925,6 +1061,13 @@
     ".opt .bd{flex:none;align-self:flex-start;font-size:11px;font-weight:700;background:var(--gold);color:var(--navy);border-radius:999px;padding:2px 8px}" +
     ".opt .go{flex:none;color:var(--blue);font-size:22px;line-height:1}" +
     ".opt .ico,.cl .ico{width:32px;height:32px;border-radius:10px}" +
+    ".dform{margin-top:4px}.drow{display:grid;grid-template-columns:104px 1fr;grid-template-areas:\"k v\" \". s\";column-gap:10px;padding:6px 0;border-bottom:1px solid #e9f0f6;font-size:13px}.drow:last-child{border:0}" +
+    ".cfk{font-size:11px;color:var(--ink2);padding-top:2px}.cfv{font-weight:600;overflow-wrap:anywhere}.drow .cfk{grid-area:k}.drow .cfv{grid-area:v}" +
+    ".dsrc{grid-area:s;justify-self:start;margin-top:3px;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:#e4f1fb;color:#0a5aa3}.dsrc.photo{background:#fff1c7;color:#8a5b00}.dsrc.you{background:#eceff2;color:#4a5560}" +
+    ".datt{display:grid;grid-template-columns:104px 1fr;column-gap:10px;padding:8px 0 2px;font-size:13px;border-top:1px solid #e9f0f6}.datt .cfk{grid-column:1;grid-row:1}.datt .cfv{grid-column:2;grid-row:1}.dthumbs{grid-column:2;grid-row:2;display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}.dthumbs:empty{display:none}.dthumbs img{height:54px;width:auto;border-radius:6px;border:1px solid var(--line)}" +
+    ".dact{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.btn.ghost{background:#fff;color:var(--navy)}.btn.ghost:hover{background:#eef6fc}.btn.gold{background:var(--gold);color:var(--navy);border-color:var(--gold)}.btn.gold:hover{background:#ffd45a;box-shadow:0 3px 0 var(--navy)}" +
+    ".ticket{display:flex;flex-direction:column;background:var(--pale);border:1px solid #c0ecff;border-left:5px solid var(--gold);border-radius:10px;padding:10px 12px;margin:2px 0 8px}.ticket .tk{font-size:11px;color:var(--ink2)}.ticket .tn{font-size:23px;letter-spacing:.5px;color:var(--navy)}.ticket .ts{font-size:12px;color:var(--ink2);margin-top:2px}" +
+    ".dmore{margin-top:8px;font-size:13px}.dmore summary{cursor:pointer;font-weight:700;color:var(--blue);padding:2px 0}" +
     ".fn{margin:10px 0 0;font-size:12px;color:var(--ink2);line-height:1.4}.cact{margin-top:10px}" +
     ".cmpw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;outline-offset:2px}" +
     ".cmp{width:100%;border-collapse:collapse;font-size:13px}" +
@@ -1009,6 +1152,7 @@
       try {
         this._root.innerHTML = buildCardHTML(tool, args);
         if (tool === "show_welcome_chips" && welcomeCards.indexOf(this) < 0) { welcomeCards.push(this); }
+        if (tool === "show_damage_claim_card") { fillClaimThumbs(this._root); }
       } catch (err) { console.warn("[wgl] card render failed for", tool, err); }
     };
     WglCard.prototype._go = function (track, dir) {
@@ -1026,8 +1170,9 @@
     };
     WglCard.prototype._click = function (ev) {
       var t = ev.target;
-      while (t && t !== this._root && !(t.getAttribute && (t.hasAttribute("data-send") || t.hasAttribute("data-nav") || t.hasAttribute("data-lang")))) { t = t.parentNode; }
+      while (t && t !== this._root && !(t.getAttribute && (t.hasAttribute("data-send") || t.hasAttribute("data-nav") || t.hasAttribute("data-lang") || t.hasAttribute("data-pdf")))) { t = t.parentNode; }
       if (!t || t === this._root) { return; }
+      if (t.hasAttribute("data-pdf")) { downloadClaimPdf(this._p && this._p.tool ? (this._p.args || {}) : (this._p || {})); return; }
       if (t.hasAttribute("data-lang")) { this._lang(t.getAttribute("data-lang")); return; }
       if (t.hasAttribute("data-nav")) { this._go(this._root.querySelector(".track"), Number(t.getAttribute("data-nav"))); return; }
       var group = t.closest ? t.closest("[data-lock]") : null;
@@ -1558,6 +1703,7 @@
   /* Used by widget-preview.html and handy in the console: WGLCards.create("show_bill_trend_card", {...}) */
   /* Test hooks of the Rev 27 speech pilot (pure functions and the voice consumer). */
   window.WGLSpeech = { dupOf: dupOf, insertLeadBubble: insertLeadBubble, leadOf: leadOf, applyDisplayText: applyDisplayText, normalize: normalizeMessages, consumer: voiceConsumer, state: voice, start: voiceStart, stop: voiceStop };
+  window.WGLClaim = { pdf: claimPdf, keep: keepClaimUpload, uploads: claimUploads };
   window.WGLTextStyle = { emphasize: tsEmphasize, scan: tsScan, css: TS_CSS, root: tsRoot };
   window.WGLCards = {
     tools: WGL_TOOLS,
