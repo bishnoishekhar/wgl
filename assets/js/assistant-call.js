@@ -273,6 +273,7 @@
         masked_account: card.masked_account || "",
         summary_lines: card.summary_lines || [],
         /* Rev 33: see the same block in assistant.js - derived by the agent callback, not measured. */
+        topic: card.topic || "",
         sentiment: card.sentiment || "",
         sentiment_source: card.sentiment_source || "derived",
         language: lang(),
