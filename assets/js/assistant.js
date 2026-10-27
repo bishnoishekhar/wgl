@@ -999,8 +999,9 @@
         (a.queue_label ? '<span class="hq">' + esc(a.queue_label) + "</span>" : "") +
         '<span class="hv ' + (verified ? "on" : "off") + '">' + (verified ? "Verified" : "Not verified") + "</span>" +
         (a.masked_account ? '<span class="hacct">' + esc(a.masked_account) + "</span>" : "") + "</div>" +
-        (lines.length ? '<div class="hsum"><div class="hsl">What the representative will see</div><ul class="hul">' +
-          lines.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul></div>" : "") +
+        /* Rev 37: the case summary is NOT shown to the customer. It still travels to the
+           representative's panel in full - it is read off the task attributes, not off this card -
+           but reading their own words back at them adds nothing and makes the card long. */
         handoffActions(a) +
         "</div>";
     }
