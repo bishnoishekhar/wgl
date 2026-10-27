@@ -272,6 +272,9 @@
         verified: card.verified === true || String(card.verified).toLowerCase() === "true",
         masked_account: card.masked_account || "",
         summary_lines: card.summary_lines || [],
+        /* Rev 33: see the same block in assistant.js - derived by the agent callback, not measured. */
+        sentiment: card.sentiment || "",
+        sentiment_source: card.sentiment_source || "derived",
         language: lang(),
         page_context: window.wglPageContext || ""
       })

@@ -1923,6 +1923,10 @@
             verified: card.verified === true,
             masked_account: card.masked_account || "",
             summary_lines: card.summary_lines || [],
+            /* Rev 33: the mood the assistant hands over with, derived by the agent callback from the
+               handoff reason. sentiment_source travels so the agent's panel can label it honestly. */
+            sentiment: card.sentiment || "",
+            sentiment_source: card.sentiment_source || "derived",
             language: flexLang(),
             page_context: window.wglPageContext || ""
           })
