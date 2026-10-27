@@ -219,10 +219,21 @@
 <div id="assistant-slot">
 <!-- @@BODY-START (generated block: edit in assets/js/widget-embed.html, then run scripts/build_pages.py) -->
 <script>
+  /* Rev 34: ?ces=sandbox points the widget at the WGL Agent Sandbox deployment instead of the live
+     demo one, so a change can be tried on the real page without touching what the demo serves.
+     Anything else - including no query string at all - keeps the live deployment, so a visitor who
+     never adds the parameter is unaffected. */
+  window.WGL_CES_DEPLOYMENTS = {
+    live: "projects/483471568825/locations/us/apps/5c509d39-b4e9-4d98-a61c-a261181fe038/deployments/c746ebd7-e448-4c29-a028-df672baa388c",
+    sandbox: "projects/483471568825/locations/us/apps/28a71ee4-32c6-4f4f-9342-54dcd99cdabf/deployments/5fece07f-d945-49a9-bf90-ba6f6e056192"
+  };
   window.addEventListener("chat-messenger-loaded", () => {
+    var which = "live";
+    try { if (new URLSearchParams(window.location.search).get("ces") === "sandbox") { which = "sandbox"; } } catch (e) {}
+    if (which === "sandbox") { console.log("[WGL] CES sandbox deployment in use"); }
     chatSdk.registerContext(
       chatSdk.prebuilts.ces.createContext({
-        deploymentName: "projects/483471568825/locations/us/apps/5c509d39-b4e9-4d98-a61c-a261181fe038/deployments/c746ebd7-e448-4c29-a028-df672baa388c",
+        deploymentName: window.WGL_CES_DEPLOYMENTS[which],
         tokenBroker: { enableTokenBroker: true, enableRecaptcha: false },
         enableWelcomeEvent: false
       }),
